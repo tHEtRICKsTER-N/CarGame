@@ -1,17 +1,18 @@
 using UnityEngine;
 
+[DisallowMultipleComponent]
 public class CarCameraController : MonoBehaviour
 {
     [Header("Camera Targets")]
-    [Tooltip("The car's transform (main body)")]
+    [Tooltip("The car's transform (main body). If empty, the first Prometeo car in the scene is used.")]
     public Transform carTransform;
 
-    [Tooltip("Optional: A specific look-at point on the car (leave empty to use car center)")]
+    [Tooltip("Optional: a specific look-at point on the car. Leave empty for a stable forward look target.")]
     public Transform lookAtTarget;
 
     [Header("Camera Mode")]
     public CameraMode currentMode = CameraMode.FollowBehind;
-    [Tooltip("Key to cycle through camera modes")]
+    [Tooltip("Key to cycle through camera modes.")]
     public KeyCode changeCameraKey = KeyCode.C;
 
     [Header("Follow Behind Settings")]
@@ -24,6 +25,16 @@ public class CarCameraController : MonoBehaviour
     [Range(1f, 20f)]
     public float rotationSmoothSpeed = 8f;
 
+    [Header("Stutter Prevention")]
+    [Tooltip("Enables Rigidbody interpolation on the target car so camera motion is smooth between physics ticks.")]
+    public bool enableRigidbodyInterpolation = true;
+    [Tooltip("Uses a flattened, smoothed car heading so bumps and body roll do not shake the chase camera.")]
+    public bool ignoreCarPitchAndRoll = true;
+    [Range(1f, 30f)]
+    public float headingSmoothSpeed = 16f;
+    [Range(1f, 30f)]
+    public float lookTargetSmoothSpeed = 18f;
+
     [Header("Orbit Settings")]
     [Range(3f, 20f)]
     public float orbitDistance = 8f;
@@ -32,13 +43,8 @@ public class CarCameraController : MonoBehaviour
     [Range(50f, 300f)]
     public float orbitSpeed = 100f;
 
-    [Header("First Person Settings")]
-    public Transform firstPersonPoint;
-    [Range(1f, 20f)]
-    public float firstPersonSmoothSpeed = 15f;
-
     [Header("Dynamic Camera Effects")]
-    [Tooltip("Enable FOV changes based on speed")]
+    [Tooltip("Enable FOV changes based on speed.")]
     public bool useDynamicFOV = true;
     [Range(50f, 70f)]
     public float baseFOV = 60f;
@@ -48,9 +54,9 @@ public class CarCameraController : MonoBehaviour
     public float fovSpeedThreshold = 100f;
 
     [Header("Camera Shake")]
-    public bool useCameraShake = true;
+    public bool useCameraShake = false;
     [Range(0f, 0.5f)]
-    public float shakeIntensity = 0.1f;
+    public float shakeIntensity = 0.08f;
 
     [Header("Collision Detection")]
     public bool avoidObstacles = true;
@@ -58,25 +64,27 @@ public class CarCameraController : MonoBehaviour
     [Range(0.1f, 2f)]
     public float cameraRadius = 0.3f;
 
-    // Private variables
     private Camera cam;
-    private Vector3 currentVelocity;
-    private float currentRotationVelocity;
-    private float orbitAngle = 0f;
-    private Vector3 shakeOffset;
+    private Rigidbody carRigidbody;
     private PrometeoCarController carController;
-    private Vector3 lastCarPosition;
+    private Transform cachedCarTransform;
+    private Vector3 currentVelocity;
+    private Vector3 smoothedForward;
+    private Vector3 smoothedLookTarget;
+    private Vector3 baseCameraPosition;
+    private Vector3 shakeOffset;
+    private float orbitAngle;
     private float currentFOV;
+    private bool targetStateInitialized;
 
     public enum CameraMode
     {
         FollowBehind,
         Orbit,
-        FirstPerson,
         Cinematic
     }
 
-    void Start()
+    private void Start()
     {
         cam = GetComponent<Camera>();
         if (cam == null)
@@ -84,11 +92,7 @@ public class CarCameraController : MonoBehaviour
             cam = Camera.main;
         }
 
-        if (carTransform != null)
-        {
-            carController = carTransform.GetComponent<PrometeoCarController>();
-            lastCarPosition = carTransform.position;
-        }
+        CacheTargetReferences();
 
         currentFOV = baseFOV;
         if (cam != null)
@@ -96,137 +100,181 @@ public class CarCameraController : MonoBehaviour
             cam.fieldOfView = currentFOV;
         }
 
-        // If no first person point is set, create one
-        if (firstPersonPoint == null && carTransform != null)
-        {
-            GameObject fpPoint = new GameObject("FirstPersonPoint");
-            fpPoint.transform.parent = carTransform;
-            fpPoint.transform.localPosition = new Vector3(0f, 1f, 0.5f);
-            firstPersonPoint = fpPoint.transform;
-        }
+        ResetCamera();
     }
 
-    void LateUpdate()
+    private void LateUpdate()
     {
-        if (carTransform == null) return;
+        CacheTargetReferences();
 
-        // Change camera mode
+        if (carTransform == null)
+        {
+            return;
+        }
+
         if (Input.GetKeyDown(changeCameraKey))
         {
             CycleCameraMode();
         }
 
-        // Get look at target
-        Vector3 lookTarget = lookAtTarget != null ? lookAtTarget.position : carTransform.position;
+        float deltaTime = Mathf.Max(Time.deltaTime, 0.0001f);
+        UpdateSmoothedTargetState(deltaTime);
 
-        // Update camera based on current mode
         switch (currentMode)
         {
             case CameraMode.FollowBehind:
-                UpdateFollowBehindCamera(lookTarget);
+                UpdateFollowBehindCamera(deltaTime);
                 break;
             case CameraMode.Orbit:
-                UpdateOrbitCamera(lookTarget);
-                break;
-            case CameraMode.FirstPerson:
-                UpdateFirstPersonCamera();
+                UpdateOrbitCamera(deltaTime);
                 break;
             case CameraMode.Cinematic:
-                UpdateCinematicCamera(lookTarget);
+                UpdateCinematicCamera(deltaTime);
                 break;
         }
 
-        // Apply dynamic FOV
         if (useDynamicFOV && cam != null)
         {
-            UpdateDynamicFOV();
+            UpdateDynamicFOV(deltaTime);
         }
 
-        // Apply camera shake
-        if (useCameraShake && currentMode != CameraMode.FirstPerson)
+        ApplyFinalPosition(deltaTime);
+    }
+
+    private void CacheTargetReferences()
+    {
+        if (carTransform == null)
         {
-            ApplyCameraShake();
+            PrometeoCarController foundCar = FindFirstObjectByType<PrometeoCarController>();
+            if (foundCar != null)
+            {
+                carTransform = foundCar.transform;
+            }
+        }
+
+        if (carTransform == null || carTransform == cachedCarTransform)
+        {
+            return;
+        }
+
+        cachedCarTransform = carTransform;
+        carRigidbody = carTransform.GetComponent<Rigidbody>();
+        carController = carTransform.GetComponent<PrometeoCarController>();
+        targetStateInitialized = false;
+
+        if (enableRigidbodyInterpolation && carRigidbody != null)
+        {
+            carRigidbody.interpolation = RigidbodyInterpolation.Interpolate;
         }
     }
 
-    void UpdateFollowBehindCamera(Vector3 lookTarget)
+    private void UpdateSmoothedTargetState(float deltaTime)
     {
-        // Calculate desired position behind the car
-        Vector3 desiredPosition = carTransform.position - (carTransform.forward * followDistance) + (Vector3.up * followHeight);
+        Vector3 rawForward = GetStableCarForward();
+        Vector3 rawLookTarget = GetRawLookTarget(rawForward);
 
-        // Check for obstacles
+        if (!targetStateInitialized)
+        {
+            smoothedForward = rawForward;
+            smoothedLookTarget = rawLookTarget;
+            baseCameraPosition = transform.position;
+            targetStateInitialized = true;
+            return;
+        }
+
+        smoothedForward = Vector3.Slerp(smoothedForward, rawForward, DampedLerp(headingSmoothSpeed, deltaTime));
+        smoothedLookTarget = Vector3.Lerp(smoothedLookTarget, rawLookTarget, DampedLerp(lookTargetSmoothSpeed, deltaTime));
+    }
+
+    private void UpdateFollowBehindCamera(float deltaTime)
+    {
+        Vector3 desiredPosition = GetCarPosition() - (smoothedForward * followDistance) + (Vector3.up * followHeight);
+
         if (avoidObstacles)
         {
-            desiredPosition = CheckCameraCollision(lookTarget, desiredPosition);
+            desiredPosition = CheckCameraCollision(smoothedLookTarget, desiredPosition);
         }
 
-        // Smooth follow
-        transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref currentVelocity, 1f / followSmoothSpeed);
+        baseCameraPosition = Vector3.SmoothDamp(
+            baseCameraPosition,
+            desiredPosition,
+            ref currentVelocity,
+            SmoothTimeFromSpeed(followSmoothSpeed),
+            Mathf.Infinity,
+            deltaTime);
 
-        // Smooth rotation to look at target
-        Vector3 direction = lookTarget - transform.position;
-        Quaternion targetRotation = Quaternion.LookRotation(direction);
-        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSmoothSpeed * Time.deltaTime);
+        RotateToward(smoothedLookTarget, rotationSmoothSpeed, deltaTime);
     }
 
-    void UpdateOrbitCamera(Vector3 lookTarget)
+    private void UpdateOrbitCamera(float deltaTime)
     {
-        // Increase orbit angle over time
-        orbitAngle += orbitSpeed * Time.deltaTime;
-        if (orbitAngle > 360f) orbitAngle -= 360f;
+        orbitAngle += orbitSpeed * deltaTime;
+        if (orbitAngle > 360f)
+        {
+            orbitAngle -= 360f;
+        }
 
-        // Calculate orbit position
         float radians = orbitAngle * Mathf.Deg2Rad;
         Vector3 offset = new Vector3(Mathf.Sin(radians) * orbitDistance, orbitHeight, Mathf.Cos(radians) * orbitDistance);
-        Vector3 desiredPosition = carTransform.position + offset;
+        Vector3 desiredPosition = GetCarPosition() + offset;
 
-        // Move camera
-        transform.position = Vector3.Lerp(transform.position, desiredPosition, followSmoothSpeed * Time.deltaTime);
-
-        // Look at target
-        transform.LookAt(lookTarget);
+        baseCameraPosition = Vector3.Lerp(baseCameraPosition, desiredPosition, DampedLerp(followSmoothSpeed, deltaTime));
+        RotateToward(smoothedLookTarget, rotationSmoothSpeed, deltaTime);
     }
 
-    void UpdateFirstPersonCamera()
+    private void UpdateCinematicCamera(float deltaTime)
     {
-        if (firstPersonPoint != null)
-        {
-            // Smooth follow for first person
-            transform.position = Vector3.Lerp(transform.position, firstPersonPoint.position, firstPersonSmoothSpeed * Time.deltaTime);
-            transform.rotation = Quaternion.Slerp(transform.rotation, firstPersonPoint.rotation, firstPersonSmoothSpeed * Time.deltaTime);
-        }
+        Vector3 right = Vector3.Cross(Vector3.up, smoothedForward).normalized;
+        Vector3 desiredPosition = GetCarPosition()
+            - (smoothedForward * followDistance * 0.55f)
+            + (right * followDistance * 0.7f)
+            + (Vector3.up * followHeight);
+
+        baseCameraPosition = Vector3.SmoothDamp(
+            baseCameraPosition,
+            desiredPosition,
+            ref currentVelocity,
+            SmoothTimeFromSpeed(followSmoothSpeed * 0.75f),
+            Mathf.Infinity,
+            deltaTime);
+
+        RotateToward(smoothedLookTarget, rotationSmoothSpeed * 0.85f, deltaTime);
     }
 
-    void UpdateCinematicCamera(Vector3 lookTarget)
-    {
-        // Side-angle follow
-        Vector3 sideOffset = carTransform.right * followDistance * 0.7f;
-        Vector3 desiredPosition = carTransform.position - (carTransform.forward * followDistance * 0.5f) + sideOffset + (Vector3.up * followHeight);
-
-        // Smooth movement
-        transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref currentVelocity, 1f / (followSmoothSpeed * 0.7f));
-
-        // Look at target
-        Vector3 direction = lookTarget - transform.position;
-        Quaternion targetRotation = Quaternion.LookRotation(direction);
-        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSmoothSpeed * 0.8f * Time.deltaTime);
-    }
-
-    void UpdateDynamicFOV()
+    private void UpdateDynamicFOV(float deltaTime)
     {
         float speed = 0f;
         if (carController != null)
         {
             speed = Mathf.Abs(carController.carSpeed);
         }
+        else if (carRigidbody != null)
+        {
+            speed = carRigidbody.linearVelocity.magnitude * 3.6f;
+        }
 
-        // Calculate target FOV based on speed
-        float targetFOV = Mathf.Lerp(baseFOV, maxFOV, speed / fovSpeedThreshold);
-        currentFOV = Mathf.Lerp(currentFOV, targetFOV, Time.deltaTime * 2f);
+        float targetFOV = Mathf.Lerp(baseFOV, maxFOV, Mathf.Clamp01(speed / fovSpeedThreshold));
+        currentFOV = Mathf.Lerp(currentFOV, targetFOV, DampedLerp(2f, deltaTime));
         cam.fieldOfView = currentFOV;
     }
 
-    void ApplyCameraShake()
+    private void ApplyFinalPosition(float deltaTime)
+    {
+        Vector3 finalPosition = baseCameraPosition;
+
+        if (useCameraShake)
+        {
+            finalPosition += GetSmoothShake(deltaTime);
+        }
+        else
+        {
+            shakeOffset = Vector3.Lerp(shakeOffset, Vector3.zero, DampedLerp(12f, deltaTime));
+        }
+
+        transform.position = finalPosition;
+    }
+
+    private Vector3 GetSmoothShake(float deltaTime)
     {
         float speed = 0f;
         bool isDrifting = false;
@@ -236,87 +284,161 @@ public class CarCameraController : MonoBehaviour
             speed = Mathf.Abs(carController.carSpeed);
             isDrifting = carController.isDrifting;
         }
-
-        // Calculate shake based on speed and drifting
-        float shakeAmount = (speed / 100f) * shakeIntensity;
-        if (isDrifting)
+        else if (carRigidbody != null)
         {
-            shakeAmount *= 2f;
+            speed = carRigidbody.linearVelocity.magnitude * 3.6f;
         }
 
-        // Generate random shake offset
-        shakeOffset = new Vector3(
-            Random.Range(-shakeAmount, shakeAmount),
-            Random.Range(-shakeAmount, shakeAmount),
-            0f
-        );
+        float shakeAmount = Mathf.Clamp01(speed / 120f) * shakeIntensity;
+        if (isDrifting)
+        {
+            shakeAmount *= 1.75f;
+        }
 
-        transform.position += shakeOffset;
+        float noiseTime = Time.time * 18f;
+        Vector3 targetShake = new Vector3(
+            (Mathf.PerlinNoise(noiseTime, 0.13f) - 0.5f) * 2f,
+            (Mathf.PerlinNoise(0.37f, noiseTime) - 0.5f) * 2f,
+            0f) * shakeAmount;
+
+        shakeOffset = Vector3.Lerp(shakeOffset, targetShake, DampedLerp(18f, deltaTime));
+        return (transform.right * shakeOffset.x) + (transform.up * shakeOffset.y);
     }
 
-    Vector3 CheckCameraCollision(Vector3 lookTarget, Vector3 desiredPosition)
+    private Vector3 CheckCameraCollision(Vector3 lookTarget, Vector3 desiredPosition)
     {
         Vector3 direction = desiredPosition - lookTarget;
         float distance = direction.magnitude;
 
-        RaycastHit hit;
-        if (Physics.SphereCast(lookTarget, cameraRadius, direction.normalized, out hit, distance, obstacleLayer))
+        if (distance <= cameraRadius)
         {
-            // Move camera closer to avoid obstacle
-            return lookTarget + direction.normalized * (hit.distance - cameraRadius);
+            return desiredPosition;
+        }
+
+        RaycastHit hit;
+        if (Physics.SphereCast(lookTarget, cameraRadius, direction / distance, out hit, distance, obstacleLayer))
+        {
+            return lookTarget + (direction / distance) * Mathf.Max(hit.distance - cameraRadius, 0.25f);
         }
 
         return desiredPosition;
     }
 
-    void CycleCameraMode()
+    private Vector3 GetStableCarForward()
     {
-        int nextMode = ((int)currentMode + 1) % System.Enum.GetValues(typeof(CameraMode)).Length;
-        currentMode = (CameraMode)nextMode;
-
-        // Reset orbit angle when switching to orbit mode
-        if (currentMode == CameraMode.Orbit)
+        Vector3 forward = carTransform.forward;
+        if (ignoreCarPitchAndRoll)
         {
-            orbitAngle = 0f;
+            forward = Vector3.ProjectOnPlane(forward, Vector3.up);
         }
 
+        if (forward.sqrMagnitude < 0.001f)
+        {
+            return smoothedForward.sqrMagnitude > 0.001f ? smoothedForward.normalized : Vector3.forward;
+        }
+
+        return forward.normalized;
+    }
+
+    private Vector3 GetRawLookTarget(Vector3 stableForward)
+    {
+        if (lookAtTarget != null)
+        {
+            return lookAtTarget.position;
+        }
+
+        return GetCarPosition() + (Vector3.up * 1.25f) + (stableForward * 1.4f);
+    }
+
+    private Vector3 GetCarPosition()
+    {
+        return carTransform != null ? carTransform.position : transform.position;
+    }
+
+    private void RotateToward(Vector3 target, float speed, float deltaTime)
+    {
+        Vector3 direction = target - baseCameraPosition;
+        if (direction.sqrMagnitude < 0.001f)
+        {
+            return;
+        }
+
+        Quaternion targetRotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, DampedLerp(speed, deltaTime));
+    }
+
+    private void CycleCameraMode()
+    {
+        int nextMode = ((int)currentMode + 1) % System.Enum.GetValues(typeof(CameraMode)).Length;
+        SetCameraMode((CameraMode)nextMode);
         Debug.Log("Camera Mode: " + currentMode);
     }
 
-    // Public method to set camera mode from other scripts
     public void SetCameraMode(CameraMode mode)
     {
         currentMode = mode;
+        currentVelocity = Vector3.zero;
+        shakeOffset = Vector3.zero;
+
         if (currentMode == CameraMode.Orbit)
         {
             orbitAngle = 0f;
         }
     }
 
-    // Public method to reset camera position
     public void ResetCamera()
     {
-        if (carTransform != null)
+        CacheTargetReferences();
+
+        if (carTransform == null)
         {
-            Vector3 resetPosition = carTransform.position - (carTransform.forward * followDistance) + (Vector3.up * followHeight);
-            transform.position = resetPosition;
-            transform.LookAt(carTransform);
+            return;
         }
+
+        Vector3 stableForward = GetStableCarForward();
+        smoothedForward = stableForward;
+        smoothedLookTarget = GetRawLookTarget(stableForward);
+        baseCameraPosition = GetCarPosition() - (stableForward * followDistance) + (Vector3.up * followHeight);
+        currentVelocity = Vector3.zero;
+        shakeOffset = Vector3.zero;
+        targetStateInitialized = true;
+
+        transform.position = baseCameraPosition;
+        transform.LookAt(smoothedLookTarget, Vector3.up);
     }
 
-    // Visualize camera settings in editor
-    void OnDrawGizmosSelected()
+    private static float SmoothTimeFromSpeed(float speed)
     {
-        if (carTransform == null) return;
+        return 1f / Mathf.Max(0.01f, speed);
+    }
 
-        // Draw follow behind position
+    private static float DampedLerp(float speed, float deltaTime)
+    {
+        return 1f - Mathf.Exp(-Mathf.Max(0f, speed) * deltaTime);
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        if (carTransform == null)
+        {
+            return;
+        }
+
+        Vector3 stableForward = Application.isPlaying && smoothedForward.sqrMagnitude > 0.001f
+            ? smoothedForward
+            : Vector3.ProjectOnPlane(carTransform.forward, Vector3.up).normalized;
+
+        if (stableForward.sqrMagnitude < 0.001f)
+        {
+            stableForward = carTransform.forward;
+        }
+
         Gizmos.color = Color.blue;
-        Vector3 followPos = carTransform.position - (carTransform.forward * followDistance) + (Vector3.up * followHeight);
+        Vector3 followPos = carTransform.position - (stableForward * followDistance) + (Vector3.up * followHeight);
         Gizmos.DrawWireSphere(followPos, 0.3f);
 
-        // Draw orbit path
         Gizmos.color = Color.yellow;
-        float segments = 32;
+        float segments = 32f;
         Vector3 lastPoint = carTransform.position + new Vector3(orbitDistance, orbitHeight, 0f);
 
         for (int i = 1; i <= segments; i++)
@@ -327,11 +449,5 @@ public class CarCameraController : MonoBehaviour
             lastPoint = point;
         }
 
-        // Draw first person point
-        if (firstPersonPoint != null)
-        {
-            Gizmos.color = Color.green;
-            Gizmos.DrawWireSphere(firstPersonPoint.position, 0.2f);
-        }
     }
 }
