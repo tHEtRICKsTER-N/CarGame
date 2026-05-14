@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public enum ArcadeRaceState
 {
@@ -14,6 +15,7 @@ public sealed class ArcadeRaceManager : MonoBehaviour
 {
     [Header("Scene References")]
     public PrometeoCarController playerCar;
+    public RaceTrackDefinition trackDefinition;
 
     [Header("Race")]
     [Range(1, 5)]
@@ -28,6 +30,9 @@ public sealed class ArcadeRaceManager : MonoBehaviour
     [Header("AI")]
     public float baseOpponentSpeedKmh = 86f;
     public float opponentSpeedStep = 5f;
+
+    [Header("Debug")]
+    public bool createTrackVisuals = true;
 
     public ArcadeRaceState State { get; private set; }
     public bool RaceActive { get { return State == ArcadeRaceState.Racing; } }
@@ -45,8 +50,10 @@ public sealed class ArcadeRaceManager : MonoBehaviour
     private Rigidbody playerRigidbody;
     private Material checkpointMaterial;
     private Material routeMaterial;
+    private StartFinishTrigger startFinishTrigger;
     private Vector3 startForward;
     private Vector3 startRight;
+    private Vector3 playerSpawnPosition;
     private bool initialized;
 
     private void Start()
@@ -54,6 +61,11 @@ public sealed class ArcadeRaceManager : MonoBehaviour
         if (playerCar == null)
         {
             playerCar = FindFirstObjectByType<PrometeoCarController>();
+        }
+
+        if (trackDefinition == null)
+        {
+            trackDefinition = FindFirstObjectByType<RaceTrackDefinition>();
         }
 
         if (playerCar == null)
@@ -108,6 +120,22 @@ public sealed class ArcadeRaceManager : MonoBehaviour
         }
     }
 
+    public void HandleStartFinishCrossing(ArcadeRaceParticipant participant)
+    {
+        if (participant == null || !participants.Contains(participant))
+        {
+            return;
+        }
+
+        if (State != ArcadeRaceState.Racing && State != ArcadeRaceState.Finished)
+        {
+            return;
+        }
+
+        participant.TickProgress(checkpoints, checkpointRadius);
+        participant.TryCompleteLap(lapsToWin, RaceTime);
+    }
+
     public int GetRank(ArcadeRaceParticipant participant)
     {
         List<ArcadeRaceParticipant> standings = GetStandings();
@@ -135,8 +163,14 @@ public sealed class ArcadeRaceManager : MonoBehaviour
         State = ArcadeRaceState.Setup;
         playerRigidbody = playerCar.GetComponent<Rigidbody>();
 
-        BuildDefaultTrack();
-        CreateTrackVisuals();
+        BuildTrack();
+
+        if (createTrackVisuals)
+        {
+            CreateTrackVisuals();
+        }
+
+        CreateStartFinishTrigger();
         PositionPlayerAtStart();
         RegisterPlayer();
         SpawnOpponents();
@@ -144,6 +178,67 @@ public sealed class ArcadeRaceManager : MonoBehaviour
 
         CountdownRemaining = countdownSeconds;
         State = ArcadeRaceState.Countdown;
+    }
+
+    private void BuildTrack()
+    {
+        if (TryBuildFromTrackDefinition())
+        {
+            return;
+        }
+
+        if (TryBuildKnownSceneTrack())
+        {
+            return;
+        }
+
+        BuildDefaultTrack();
+    }
+
+    private bool TryBuildFromTrackDefinition()
+    {
+        if (trackDefinition == null || !trackDefinition.TryGetCheckpointPositions(checkpoints))
+        {
+            return false;
+        }
+
+        checkpointRadius = trackDefinition.checkpointRadius;
+        playerSpawnPosition = trackDefinition.GetStartPosition(checkpoints[0]);
+        startForward = trackDefinition.GetStartForward(GetDirectionToNextCheckpoint());
+        startRight = Vector3.Cross(Vector3.up, startForward).normalized;
+        return true;
+    }
+
+    private bool TryBuildKnownSceneTrack()
+    {
+        if (SceneManager.GetActiveScene().name != "complete_track_demo")
+        {
+            return false;
+        }
+
+        BuildCartoonOvalTrack();
+        return true;
+    }
+
+    private void BuildCartoonOvalTrack()
+    {
+        checkpoints.Clear();
+
+        startForward = Vector3.right;
+        startRight = Vector3.Cross(Vector3.up, startForward).normalized;
+        checkpointRadius = 16f;
+
+        checkpoints.Add(new Vector3(-54f, 0f, -28f));
+        checkpoints.Add(new Vector3(4f, 0f, -28f));
+        checkpoints.Add(new Vector3(58f, 0f, -25f));
+        checkpoints.Add(new Vector3(83f, 0f, 0f));
+        checkpoints.Add(new Vector3(58f, 0f, 25f));
+        checkpoints.Add(new Vector3(0f, 0f, 31f));
+        checkpoints.Add(new Vector3(-58f, 0f, 25f));
+        checkpoints.Add(new Vector3(-83f, 0f, 0f));
+        checkpoints.Add(new Vector3(-58f, 0f, -25f));
+
+        playerSpawnPosition = checkpoints[0] - (startForward * 6f) - (startRight * 3f);
     }
 
     private void BuildDefaultTrack()
@@ -158,6 +253,7 @@ public sealed class ArcadeRaceManager : MonoBehaviour
         }
 
         startRight = Vector3.Cross(Vector3.up, startForward).normalized;
+        playerSpawnPosition = origin - (startForward * 6f) - (startRight * 3f);
 
         checkpoints.Add(origin);
         checkpoints.Add(origin + (startForward * 72f));
@@ -172,7 +268,7 @@ public sealed class ArcadeRaceManager : MonoBehaviour
     private void PositionPlayerAtStart()
     {
         Transform playerTransform = playerCar.transform;
-        playerTransform.position = checkpoints[0] - (startForward * 6f) - (startRight * 3f);
+        playerTransform.position = playerSpawnPosition;
         playerTransform.rotation = Quaternion.LookRotation(startForward, Vector3.up);
 
         if (playerRigidbody != null)
@@ -236,11 +332,22 @@ public sealed class ArcadeRaceManager : MonoBehaviour
         return checkpoints[0] - (startForward * (8f + row * 7f)) + (startRight * lane * 5f);
     }
 
+    private Vector3 GetDirectionToNextCheckpoint()
+    {
+        if (checkpoints.Count < 2)
+        {
+            return playerCar != null ? playerCar.transform.forward : Vector3.forward;
+        }
+
+        Vector3 direction = Vector3.ProjectOnPlane(checkpoints[1] - checkpoints[0], Vector3.up);
+        return direction.sqrMagnitude > 0.01f ? direction.normalized : Vector3.forward;
+    }
+
     private void TickParticipants()
     {
         for (int i = 0; i < participants.Count; i++)
         {
-            participants[i].TickProgress(checkpoints, checkpointRadius, lapsToWin, RaceTime);
+            participants[i].TickProgress(checkpoints, checkpointRadius);
         }
     }
 
@@ -262,6 +369,33 @@ public sealed class ArcadeRaceManager : MonoBehaviour
         hud.Initialize(this);
     }
 
+    private void CreateStartFinishTrigger()
+    {
+        if (checkpoints.Count == 0)
+        {
+            return;
+        }
+
+        Vector3 triggerPosition = trackDefinition != null
+            ? trackDefinition.GetStartFinishPosition(checkpoints[0])
+            : checkpoints[0];
+        Quaternion triggerRotation = trackDefinition != null
+            ? trackDefinition.GetStartFinishRotation(startForward)
+            : Quaternion.LookRotation(startForward, Vector3.up);
+
+        GameObject triggerObject = new GameObject("Start Finish Trigger");
+        triggerObject.transform.SetParent(transform, false);
+        triggerObject.transform.SetPositionAndRotation(triggerPosition, triggerRotation);
+
+        BoxCollider boxCollider = triggerObject.AddComponent<BoxCollider>();
+        boxCollider.isTrigger = true;
+        boxCollider.size = trackDefinition != null ? trackDefinition.startFinishTriggerSize : new Vector3(14f, 5f, 4f);
+        boxCollider.center = trackDefinition != null ? trackDefinition.startFinishTriggerCenter : new Vector3(0f, 2.5f, 0f);
+
+        startFinishTrigger = triggerObject.AddComponent<StartFinishTrigger>();
+        startFinishTrigger.raceManager = this;
+    }
+
     private void CreateTrackVisuals()
     {
         checkpointMaterial = CreateMaterial("Arcade Checkpoint Material", new Color(0f, 0.85f, 1f, 0.75f));
@@ -272,7 +406,7 @@ public sealed class ArcadeRaceManager : MonoBehaviour
 
         LineRenderer lineRenderer = visualsRoot.AddComponent<LineRenderer>();
         lineRenderer.useWorldSpace = true;
-        lineRenderer.loop = true;
+        lineRenderer.loop = false;
         lineRenderer.widthMultiplier = 0.35f;
         lineRenderer.positionCount = checkpoints.Count;
         lineRenderer.material = routeMaterial;

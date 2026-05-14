@@ -11,6 +11,7 @@ public sealed class ArcadeRaceParticipant : MonoBehaviour
     public float ProgressScore { get; private set; }
     public float FinishTime { get; private set; }
     public bool HasFinished { get; private set; }
+    public bool CanCompleteLap { get { return NextCheckpointIndex == 0 && !HasFinished; } }
 
     private ArcadeRaceManager raceManager;
 
@@ -26,10 +27,16 @@ public sealed class ArcadeRaceParticipant : MonoBehaviour
         HasFinished = false;
     }
 
-    public void TickProgress(IReadOnlyList<Vector3> checkpoints, float checkpointRadius, int lapsToWin, float raceTime)
+    public void TickProgress(IReadOnlyList<Vector3> checkpoints, float checkpointRadius)
     {
         if (HasFinished || checkpoints == null || checkpoints.Count < 2)
         {
+            return;
+        }
+
+        if (NextCheckpointIndex == 0)
+        {
+            ProgressScore = CalculateProgressScore(checkpoints);
             return;
         }
 
@@ -38,16 +45,43 @@ public sealed class ArcadeRaceParticipant : MonoBehaviour
 
         while (safety > 0 && (transform.position - checkpoints[NextCheckpointIndex]).sqrMagnitude <= radiusSqr)
         {
-            AdvanceCheckpoint(checkpoints.Count, lapsToWin, raceTime);
-            safety--;
-
-            if (HasFinished)
+            AdvanceCheckpoint(checkpoints.Count);
+            if (NextCheckpointIndex == 0)
             {
                 break;
             }
+
+            safety--;
         }
 
         ProgressScore = CalculateProgressScore(checkpoints);
+    }
+
+    public bool TryCompleteLap(int lapsToWin, float raceTime)
+    {
+        if (!CanCompleteLap)
+        {
+            return false;
+        }
+
+        CompletedLaps++;
+
+        if (CompletedLaps >= lapsToWin)
+        {
+            HasFinished = true;
+            FinishTime = raceTime;
+
+            if (raceManager != null)
+            {
+                raceManager.NotifyParticipantFinished(this);
+            }
+        }
+        else
+        {
+            NextCheckpointIndex = 1;
+        }
+
+        return true;
     }
 
     public float DistanceToNextCheckpoint(IReadOnlyList<Vector3> checkpoints)
@@ -60,30 +94,13 @@ public sealed class ArcadeRaceParticipant : MonoBehaviour
         return Vector3.Distance(transform.position, checkpoints[NextCheckpointIndex]);
     }
 
-    private void AdvanceCheckpoint(int checkpointCount, int lapsToWin, float raceTime)
+    private void AdvanceCheckpoint(int checkpointCount)
     {
-        int checkpointHit = NextCheckpointIndex;
         NextCheckpointIndex++;
 
         if (NextCheckpointIndex >= checkpointCount)
         {
             NextCheckpointIndex = 0;
-        }
-
-        if (checkpointHit == 0)
-        {
-            CompletedLaps++;
-
-            if (CompletedLaps >= lapsToWin)
-            {
-                HasFinished = true;
-                FinishTime = raceTime;
-
-                if (raceManager != null)
-                {
-                    raceManager.NotifyParticipantFinished(this);
-                }
-            }
         }
     }
 

@@ -109,14 +109,21 @@ public sealed class ArcadeRaceHud : MonoBehaviour
             return;
         }
 
-        int lap = Mathf.Clamp(player.CompletedLaps + 1, 1, raceManager.LapsToWin);
+        int lap = player.HasFinished ? raceManager.LapsToWin : Mathf.Clamp(player.CompletedLaps + 1, 1, raceManager.LapsToWin);
         int rank = raceManager.GetRank(player);
 
         builder.Length = 0;
         builder.Append("Lap ").Append(lap).Append(" / ").Append(raceManager.LapsToWin).AppendLine();
         builder.Append("Position ").Append(rank).Append(" / ").Append(raceManager.Participants.Count).AppendLine();
         builder.Append("Time ").Append(raceManager.RaceTime.ToString("0.0")).Append("s").AppendLine();
-        builder.Append("Next gate ").Append(player.NextCheckpointIndex + 1).Append(" / ").Append(raceManager.Checkpoints.Count);
+        if (player.CanCompleteLap)
+        {
+            builder.Append("Finish line ready");
+        }
+        else
+        {
+            builder.Append("Next gate ").Append(player.NextCheckpointIndex + 1).Append(" / ").Append(raceManager.Checkpoints.Count);
+        }
         raceInfoText.text = builder.ToString();
     }
 
