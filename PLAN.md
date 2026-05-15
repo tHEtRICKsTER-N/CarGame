@@ -73,6 +73,46 @@ Build a small Need-for-Speed-inspired arcade racing game as a personal gift proj
 - `[ ]` Add AI difficulty selection for Race mode.
 - `[ ]` Make it easy to add more track maps later without rewriting race logic.
 
+## Milestone 3A: Player-Facing UI Screens
+
+The player-facing UI will be designed manually, then connected to the gameplay systems. The current runtime-generated setup/HUD UI is temporary.
+
+- `[ ]` Design Main Menu screen.
+- `[ ]` Design Mode Select screen.
+- `[ ]` Design Race Setup screen.
+- `[ ]` Design Time Attack Setup screen.
+- `[ ]` Design Race HUD.
+- `[ ]` Design Time Attack HUD.
+- `[ ]` Design Pause screen.
+- `[ ]` Design Race Results screen.
+- `[ ]` Design Time Attack Results screen.
+- `[ ]` Design Settings screen.
+- `[x]` Create reusable dark neumorphic UI shader/material for panels, images, and buttons.
+- `[x]` Add shader-driven neumorphic button press animation and editor tooling.
+- `[ ]` Replace temporary code-generated UI with designed UI prefabs/scenes.
+
+Recommended screen contents:
+
+- Main Menu: game title/logo, Play, Garage/Car Select, Settings, Quit, optional rotating selected car or track camera background.
+- Mode Select: Race Mode, Time Attack, short mode descriptions.
+- Race Setup: map selector, map thumbnail/name, car selector/preview/name, AI difficulty, lap selector, Start Race, Back.
+- Time Attack Setup: map selector, car selector/preview/name, time limit preview, coin count preview, Start Time Attack, Back.
+- Race HUD: lap, race position, race timer, speed, boost meter, countdown overlay, optional route/checkpoint arrow.
+- Time Attack HUD: main timer, coins collected/total, speed, boost meter, low-time warning state.
+- Pause: Resume, Restart, Settings, Main Menu.
+- Race Results: finish position, player time, standings list, Restart, Change Setup, Main Menu.
+- Time Attack Results: win/lose title, coins collected, time remaining/time ran out, Restart, Change Setup, Main Menu.
+- Settings: master volume, music volume, SFX volume, camera shake toggle, fullscreen toggle, Back.
+
+UI visual direction:
+
+- Use a dark neumorphic theme instead of white/light neumorphism.
+- Base surfaces should sit around near-black charcoal, with soft upper-left highlights and lower-right shadows.
+- Use neumorphism mostly for panels, cards, image containers, and buttons; keep text and icons crisp and high-contrast.
+- Use brighter accent colors sparingly for active/selected/gameplay states such as Start, Boost, Timer, map selection, car selection, and EMPRESS difficulty.
+- Prefer raised surfaces for normal buttons/panels and inset surfaces for selected, pressed, meter wells, and input-like areas.
+- Buttons should use shader-driven press animation: raised at rest, then smoothly morphing to inset while pressed.
+
 ## Milestone 4: Boost System
 
 - `[x]` Add boost meter to the player.
