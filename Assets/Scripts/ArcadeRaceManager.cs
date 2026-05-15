@@ -28,6 +28,7 @@ public sealed class ArcadeRaceManager : MonoBehaviour
     public float countdownSeconds = 3f;
 
     [Header("AI")]
+    public RaceAIDifficulty aiDifficulty = RaceAIDifficulty.Medium;
     public float baseOpponentSpeedKmh = 86f;
     public float opponentSpeedStep = 5f;
 
@@ -40,10 +41,15 @@ public sealed class ArcadeRaceManager : MonoBehaviour
     public float RaceTime { get; private set; }
     public int LapsToWin { get { return lapsToWin; } }
     public IReadOnlyList<Vector3> Checkpoints { get { return checkpoints; } }
+    public IReadOnlyList<RaceRouteConnection> RouteConnections { get { return routeConnections; } }
     public IReadOnlyList<ArcadeRaceParticipant> Participants { get { return participants; } }
     public ArcadeRaceParticipant PlayerParticipant { get; private set; }
+    public RaceAIDifficulty AIDifficulty { get { return aiDifficulty; } }
+    public float CheckpointRadius { get { return checkpointRadius; } }
+    public bool HasRouteGraph { get { return routeConnections.Count > 0; } }
 
     private readonly List<Vector3> checkpoints = new List<Vector3>();
+    private readonly List<RaceRouteConnection> routeConnections = new List<RaceRouteConnection>();
     private readonly List<ArcadeRaceParticipant> participants = new List<ArcadeRaceParticipant>();
     private readonly List<ArcadeRaceParticipant> finishOrder = new List<ArcadeRaceParticipant>();
     private readonly string[] opponentNames = { "Nova", "Blaze", "Viper", "Comet", "Rogue" };
@@ -157,6 +163,124 @@ public sealed class ArcadeRaceManager : MonoBehaviour
         return standings;
     }
 
+    public int GetNextProgressCheckpointIndex(int currentIndex)
+    {
+        if (checkpoints.Count < 2)
+        {
+            return 0;
+        }
+
+        currentIndex = Mathf.Clamp(currentIndex, 0, checkpoints.Count - 1);
+        if (currentIndex >= checkpoints.Count - 1)
+        {
+            return 0;
+        }
+
+        int sequentialIndex = currentIndex + 1;
+        if (!HasRouteGraph || HasForwardRouteConnection(currentIndex, sequentialIndex))
+        {
+            return sequentialIndex;
+        }
+
+        int bestIndex = sequentialIndex;
+        int bestAdvance = int.MaxValue;
+        for (int i = 0; i < routeConnections.Count; i++)
+        {
+            RaceRouteConnection connection = routeConnections[i];
+            if (!IsForwardRouteEdge(connection, currentIndex))
+            {
+                continue;
+            }
+
+            int advance = GetProgressAdvance(currentIndex, connection.toIndex);
+            if (advance > 0 && advance < bestAdvance)
+            {
+                bestAdvance = advance;
+                bestIndex = connection.toIndex;
+            }
+        }
+
+        return bestIndex;
+    }
+
+    public bool TryGetProgressCheckpointHit(Vector3 position, int currentIndex, float radius, out int hitIndex)
+    {
+        hitIndex = -1;
+
+        if (checkpoints.Count < 2)
+        {
+            return false;
+        }
+
+        currentIndex = Mathf.Clamp(currentIndex, 0, checkpoints.Count - 1);
+        if (currentIndex >= checkpoints.Count - 1)
+        {
+            return false;
+        }
+
+        float radiusSqr = radius * radius;
+        int sequentialIndex = currentIndex + 1;
+        int bestAdvance = -1;
+        float bestDistanceSqr = float.MaxValue;
+
+        EvaluateProgressHit(position, currentIndex, sequentialIndex, radiusSqr, ref hitIndex, ref bestAdvance, ref bestDistanceSqr);
+
+        for (int i = 0; i < routeConnections.Count; i++)
+        {
+            RaceRouteConnection connection = routeConnections[i];
+            if (!IsForwardRouteEdge(connection, currentIndex))
+            {
+                continue;
+            }
+
+            EvaluateProgressHit(position, currentIndex, connection.toIndex, radiusSqr, ref hitIndex, ref bestAdvance, ref bestDistanceSqr);
+        }
+
+        return hitIndex >= 0;
+    }
+
+    public int GetNextRoutePointIndex(int currentIndex, RaceAIDifficulty difficulty, float driverSeed)
+    {
+        if (checkpoints.Count < 2)
+        {
+            return 0;
+        }
+
+        currentIndex = Mathf.Clamp(currentIndex, 0, checkpoints.Count - 1);
+        if (currentIndex >= checkpoints.Count - 1)
+        {
+            return 0;
+        }
+
+        if (!HasRouteGraph)
+        {
+            return currentIndex + 1;
+        }
+
+        int selectedIndex = currentIndex + 1;
+        float bestScore = float.NegativeInfinity;
+        bool foundCandidate = false;
+
+        for (int i = 0; i < routeConnections.Count; i++)
+        {
+            RaceRouteConnection connection = routeConnections[i];
+            if (!IsForwardRouteEdge(connection, currentIndex))
+            {
+                continue;
+            }
+
+            float score = GetRouteChoiceScore(connection, difficulty, driverSeed);
+            if (score > bestScore)
+            {
+                foundCandidate = true;
+                bestScore = score;
+                selectedIndex = connection.toIndex;
+            }
+        }
+
+        return foundCandidate ? selectedIndex : currentIndex + 1;
+    }
+
     private void InitializeRace()
     {
         initialized = true;
@@ -182,6 +306,8 @@ public sealed class ArcadeRaceManager : MonoBehaviour
 
     private void BuildTrack()
     {
+        routeConnections.Clear();
+
         if (TryBuildFromTrackDefinition())
         {
             return;
@@ -203,6 +329,7 @@ public sealed class ArcadeRaceManager : MonoBehaviour
         }
 
         checkpointRadius = trackDefinition.checkpointRadius;
+        trackDefinition.TryGetRouteConnections(routeConnections);
         playerSpawnPosition = trackDefinition.GetStartPosition(checkpoints[0]);
         startForward = trackDefinition.GetStartForward(GetDirectionToNextCheckpoint());
         startRight = Vector3.Cross(Vector3.up, startForward).normalized;
@@ -343,6 +470,168 @@ public sealed class ArcadeRaceManager : MonoBehaviour
         return direction.sqrMagnitude > 0.01f ? direction.normalized : Vector3.forward;
     }
 
+    private void EvaluateProgressHit(Vector3 position, int currentIndex, int candidateIndex, float radiusSqr, ref int hitIndex, ref int bestAdvance, ref float bestDistanceSqr)
+    {
+        if (candidateIndex <= currentIndex || candidateIndex >= checkpoints.Count)
+        {
+            return;
+        }
+
+        float distanceSqr = (position - checkpoints[candidateIndex]).sqrMagnitude;
+        if (distanceSqr > radiusSqr)
+        {
+            return;
+        }
+
+        int advance = GetProgressAdvance(currentIndex, candidateIndex);
+        if (advance > bestAdvance || (advance == bestAdvance && distanceSqr < bestDistanceSqr))
+        {
+            bestAdvance = advance;
+            bestDistanceSqr = distanceSqr;
+            hitIndex = candidateIndex;
+        }
+    }
+
+    private bool IsForwardRouteEdge(RaceRouteConnection connection, int currentIndex)
+    {
+        if (connection == null || !connection.IsValid(checkpoints.Count) || connection.fromIndex != currentIndex)
+        {
+            return false;
+        }
+
+        if (connection.toIndex == 0)
+        {
+            return currentIndex >= checkpoints.Count - 1;
+        }
+
+        return connection.toIndex > currentIndex;
+    }
+
+    private bool HasForwardRouteConnection(int fromIndex, int toIndex)
+    {
+        for (int i = 0; i < routeConnections.Count; i++)
+        {
+            RaceRouteConnection connection = routeConnections[i];
+            if (connection != null && connection.fromIndex == fromIndex && connection.toIndex == toIndex)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private int GetProgressAdvance(int fromIndex, int toIndex)
+    {
+        if (toIndex > fromIndex)
+        {
+            return toIndex - fromIndex;
+        }
+
+        if (toIndex == 0 && fromIndex >= checkpoints.Count - 1)
+        {
+            return 1;
+        }
+
+        return -1;
+    }
+
+    private float GetRouteChoiceScore(RaceRouteConnection connection, RaceAIDifficulty difficulty, float driverSeed)
+    {
+        int advance = Mathf.Max(1, GetProgressAdvance(connection.fromIndex, connection.toIndex));
+        float preference = GetDifficultyPreference(connection.kind, difficulty);
+        float shortcutPressure = 0f;
+
+        switch (difficulty)
+        {
+            case RaceAIDifficulty.Easy:
+                shortcutPressure = -0.45f * Mathf.Max(0, advance - 1);
+                break;
+            case RaceAIDifficulty.Medium:
+                shortcutPressure = 0.08f * Mathf.Max(0, advance - 1);
+                break;
+            case RaceAIDifficulty.Hard:
+                shortcutPressure = 0.24f * Mathf.Max(0, advance - 1);
+                break;
+            case RaceAIDifficulty.EMPRESS:
+                shortcutPressure = 0.42f * Mathf.Max(0, advance - 1);
+                break;
+        }
+
+        float distancePenalty = GetFlatDistance(connection.fromIndex, connection.toIndex) * 0.004f;
+        float deterministicNoise = Mathf.Sin((driverSeed + 1f) * 12.9898f + connection.toIndex * 78.233f) * 0.08f;
+        return preference + shortcutPressure - distancePenalty - connection.weight * 0.15f + deterministicNoise;
+    }
+
+    private static float GetDifficultyPreference(RaceRouteConnectionKind kind, RaceAIDifficulty difficulty)
+    {
+        switch (difficulty)
+        {
+            case RaceAIDifficulty.Easy:
+                switch (kind)
+                {
+                    case RaceRouteConnectionKind.Safe:
+                        return 4.2f;
+                    case RaceRouteConnectionKind.Fast:
+                        return 1.8f;
+                    case RaceRouteConnectionKind.Shortcut:
+                        return 0.5f;
+                    default:
+                        return 3.2f;
+                }
+            case RaceAIDifficulty.Hard:
+                switch (kind)
+                {
+                    case RaceRouteConnectionKind.Safe:
+                        return 1.7f;
+                    case RaceRouteConnectionKind.Fast:
+                        return 3.4f;
+                    case RaceRouteConnectionKind.Shortcut:
+                        return 3.8f;
+                    default:
+                        return 2.4f;
+                }
+            case RaceAIDifficulty.EMPRESS:
+                switch (kind)
+                {
+                    case RaceRouteConnectionKind.Safe:
+                        return 1.2f;
+                    case RaceRouteConnectionKind.Fast:
+                        return 3.9f;
+                    case RaceRouteConnectionKind.Shortcut:
+                        return 4.8f;
+                    default:
+                        return 2.1f;
+                }
+            default:
+                switch (kind)
+                {
+                    case RaceRouteConnectionKind.Safe:
+                        return 3f;
+                    case RaceRouteConnectionKind.Fast:
+                        return 2.7f;
+                    case RaceRouteConnectionKind.Shortcut:
+                        return 2f;
+                    default:
+                        return 3f;
+                }
+        }
+    }
+
+    private float GetFlatDistance(int fromIndex, int toIndex)
+    {
+        if (fromIndex < 0 || fromIndex >= checkpoints.Count || toIndex < 0 || toIndex >= checkpoints.Count)
+        {
+            return 0f;
+        }
+
+        Vector3 from = checkpoints[fromIndex];
+        Vector3 to = checkpoints[toIndex];
+        from.y = 0f;
+        to.y = 0f;
+        return Vector3.Distance(from, to);
+    }
+
     private void TickParticipants()
     {
         for (int i = 0; i < participants.Count; i++)
@@ -404,20 +693,63 @@ public sealed class ArcadeRaceManager : MonoBehaviour
         GameObject visualsRoot = new GameObject("Arcade Race Track");
         visualsRoot.transform.SetParent(transform, false);
 
-        LineRenderer lineRenderer = visualsRoot.AddComponent<LineRenderer>();
-        lineRenderer.useWorldSpace = true;
-        lineRenderer.loop = false;
-        lineRenderer.widthMultiplier = 0.35f;
-        lineRenderer.positionCount = checkpoints.Count;
-        lineRenderer.material = routeMaterial;
-        lineRenderer.startColor = routeMaterial.color;
-        lineRenderer.endColor = routeMaterial.color;
-
         for (int i = 0; i < checkpoints.Count; i++)
         {
-            lineRenderer.SetPosition(i, checkpoints[i] + Vector3.up * 0.15f);
             CreateCheckpointMarker(visualsRoot.transform, checkpoints[i], i);
         }
+
+        if (HasRouteGraph)
+        {
+            for (int i = 0; i < routeConnections.Count; i++)
+            {
+                RaceRouteConnection connection = routeConnections[i];
+                if (connection == null || !connection.IsValid(checkpoints.Count))
+                {
+                    continue;
+                }
+
+                CreateRouteLine(
+                    visualsRoot.transform,
+                    "Route " + connection.fromIndex + " -> " + connection.toIndex,
+                    checkpoints[connection.fromIndex],
+                    checkpoints[connection.toIndex],
+                    GetConnectionColor(connection.kind),
+                    connection.kind == RaceRouteConnectionKind.Normal ? 0.22f : 0.36f);
+            }
+        }
+        else
+        {
+            LineRenderer lineRenderer = visualsRoot.AddComponent<LineRenderer>();
+            lineRenderer.useWorldSpace = true;
+            lineRenderer.loop = false;
+            lineRenderer.widthMultiplier = 0.35f;
+            lineRenderer.positionCount = checkpoints.Count;
+            lineRenderer.material = routeMaterial;
+            lineRenderer.startColor = routeMaterial.color;
+            lineRenderer.endColor = routeMaterial.color;
+
+            for (int i = 0; i < checkpoints.Count; i++)
+            {
+                lineRenderer.SetPosition(i, checkpoints[i] + Vector3.up * 0.15f);
+            }
+        }
+    }
+
+    private void CreateRouteLine(Transform parent, string lineName, Vector3 from, Vector3 to, Color color, float width)
+    {
+        GameObject lineObject = new GameObject(lineName);
+        lineObject.transform.SetParent(parent, false);
+
+        LineRenderer lineRenderer = lineObject.AddComponent<LineRenderer>();
+        lineRenderer.useWorldSpace = true;
+        lineRenderer.loop = false;
+        lineRenderer.widthMultiplier = width;
+        lineRenderer.positionCount = 2;
+        lineRenderer.material = routeMaterial;
+        lineRenderer.startColor = color;
+        lineRenderer.endColor = color;
+        lineRenderer.SetPosition(0, from + Vector3.up * 0.18f);
+        lineRenderer.SetPosition(1, to + Vector3.up * 0.18f);
     }
 
     private void CreateCheckpointMarker(Transform parent, Vector3 position, int index)
@@ -471,6 +803,23 @@ public sealed class ArcadeRaceManager : MonoBehaviour
         material.color = color;
         return material;
     }
+
+    private static Color GetConnectionColor(RaceRouteConnectionKind kind)
+    {
+        switch (kind)
+        {
+            case RaceRouteConnectionKind.Safe:
+                return new Color(0.25f, 0.95f, 0.45f, 0.9f);
+            case RaceRouteConnectionKind.Fast:
+                return new Color(0.15f, 0.65f, 1f, 0.9f);
+            case RaceRouteConnectionKind.Shortcut:
+                return new Color(1f, 0.82f, 0.05f, 1f);
+            default:
+                return routeMaterialColor;
+        }
+    }
+
+    private static readonly Color routeMaterialColor = new Color(1f, 1f, 1f, 0.5f);
 
     private static void DisableOpponentAudio(GameObject opponentObject)
     {

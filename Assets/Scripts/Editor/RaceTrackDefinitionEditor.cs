@@ -10,6 +10,9 @@ public sealed class RaceTrackDefinitionEditor : Editor
 
     private RaceTrackDefinition track;
     private int selectedCheckpointIndex = -1;
+    private int manualConnectionStartIndex = -1;
+    private RaceRouteConnectionKind manualConnectionKind = RaceRouteConnectionKind.Normal;
+    private readonly List<RaceRouteConnection> previewConnections = new List<RaceRouteConnection>();
 
     private void OnEnable()
     {
@@ -45,12 +48,35 @@ public sealed class RaceTrackDefinitionEditor : Editor
         EditorGUILayout.Space(8f);
         EditorGUILayout.PropertyField(serializedObject.FindProperty("checkpoints"), true);
 
+        EditorGUILayout.Space(8f);
+        DrawRouteGraphSettings();
+
         serializedObject.ApplyModifiedProperties();
 
         selectedCheckpointIndex = GetSelectedCheckpointIndex();
 
         EditorGUILayout.Space(12f);
         DrawToolButtons();
+    }
+
+    private void DrawRouteGraphSettings()
+    {
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+        {
+            EditorGUILayout.LabelField("Auto Route Graph", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("Place checkpoints in rough driving order. The graph connects forward points and can infer useful shortcut links without drawing a forced loop back to start.", MessageType.Info);
+
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("autoGenerateMainRouteConnections"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("autoConnectFinalCheckpointToStart"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("autoBuildInferredRouteConnections"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("autoGraphMaxConnectionDistance"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("autoGraphMaxIndexSkip"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("autoGraphMinimumShortcutSaving"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("drawRouteConnections"));
+
+            EditorGUILayout.Space(4f);
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("routeConnections"), true);
+        }
     }
 
     private void DrawToolButtons()
@@ -121,6 +147,56 @@ public sealed class RaceTrackDefinitionEditor : Editor
                 ProjectCheckpointsToGround();
             }
         }
+
+        DrawRouteGraphTools();
+    }
+
+    private void DrawRouteGraphTools()
+    {
+        using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+        {
+            EditorGUILayout.LabelField("Route Graph Tools", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Manual links are optional corrections; the auto graph is used by default.");
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("Refresh Auto Graph Preview"))
+                {
+                    SceneView.RepaintAll();
+                }
+
+                if (GUILayout.Button("Clear Manual Links"))
+                {
+                    Undo.RegisterCompleteObjectUndo(track, "Clear Manual Route Links");
+                    track.ClearRouteConnections();
+                    EditorUtility.SetDirty(track);
+                    SceneView.RepaintAll();
+                }
+            }
+
+            manualConnectionKind = (RaceRouteConnectionKind)EditorGUILayout.EnumPopup("Manual Link Kind", manualConnectionKind);
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                GUI.enabled = selectedCheckpointIndex >= 0;
+                if (GUILayout.Button("Use Selected As Link Start"))
+                {
+                    manualConnectionStartIndex = selectedCheckpointIndex;
+                }
+
+                GUI.enabled = manualConnectionStartIndex >= 0 && selectedCheckpointIndex >= 0 && manualConnectionStartIndex != selectedCheckpointIndex;
+                string targetLabel = selectedCheckpointIndex >= 0 ? GetCheckpointLabel(selectedCheckpointIndex) : "Selected";
+                if (GUILayout.Button("Add Manual Link To " + targetLabel))
+                {
+                    AddManualRouteConnection(manualConnectionStartIndex, selectedCheckpointIndex);
+                }
+
+                GUI.enabled = true;
+            }
+
+            string startLabel = manualConnectionStartIndex >= 0 ? GetCheckpointLabel(manualConnectionStartIndex) : "None";
+            EditorGUILayout.LabelField("Manual Link Start", startLabel);
+        }
     }
 
     private void DuringSceneGui(SceneView sceneView)
@@ -131,6 +207,7 @@ public sealed class RaceTrackDefinitionEditor : Editor
         }
 
         selectedCheckpointIndex = GetSelectedCheckpointIndex();
+        DrawRouteConnections();
         DrawCheckpointHandles();
         DrawTrackLine();
         DrawSpawnHandle();
@@ -204,6 +281,42 @@ public sealed class RaceTrackDefinitionEditor : Editor
         }
     }
 
+    private void DrawRouteConnections()
+    {
+        if (!track.drawRouteConnections || !track.TryGetRouteConnections(previewConnections))
+        {
+            return;
+        }
+
+        for (int i = 0; i < previewConnections.Count; i++)
+        {
+            RaceRouteConnection connection = previewConnections[i];
+            if (connection == null || !connection.IsValid(track.CheckpointCount))
+            {
+                continue;
+            }
+
+            Transform from = track.checkpoints[connection.fromIndex];
+            Transform to = track.checkpoints[connection.toIndex];
+            if (from == null || to == null)
+            {
+                continue;
+            }
+
+            Handles.color = GetConnectionColor(connection.kind);
+            float width = connection.kind == RaceRouteConnectionKind.Normal ? 2.5f : 4f;
+            Vector3 fromPosition = from.position + Vector3.up * 0.55f;
+            Vector3 toPosition = to.position + Vector3.up * 0.55f;
+            Handles.DrawAAPolyLine(width, fromPosition, toPosition);
+
+            if (connection.kind != RaceRouteConnectionKind.Normal)
+            {
+                Vector3 midPoint = Vector3.Lerp(fromPosition, toPosition, 0.5f);
+                Handles.Label(midPoint + Vector3.up * 0.35f, connection.kind.ToString());
+            }
+        }
+    }
+
     private void DrawSpawnHandle()
     {
         if (track.playerSpawn == null)
@@ -267,14 +380,7 @@ public sealed class RaceTrackDefinitionEditor : Editor
         checkpointObject.transform.SetParent(track.transform);
         checkpointObject.transform.position = position;
 
-        List<Transform> ordered = new List<Transform>();
-        if (track.checkpoints != null)
-        {
-            ordered.AddRange(track.checkpoints);
-        }
-
-        ordered.Insert(insertIndex, checkpointObject.transform);
-        track.SetCheckpoints(ordered);
+        track.InsertCheckpoint(checkpointObject.transform, insertIndex);
         RenameInOrder();
         EditorUtility.SetDirty(track);
         Selection.activeTransform = checkpointObject.transform;
@@ -350,6 +456,7 @@ public sealed class RaceTrackDefinitionEditor : Editor
     {
         Undo.RegisterCompleteObjectUndo(track, "Refresh Track Checkpoints");
         track.RefreshCheckpointsFromChildren();
+        manualConnectionStartIndex = -1;
         EditorUtility.SetDirty(track);
     }
 
@@ -357,7 +464,16 @@ public sealed class RaceTrackDefinitionEditor : Editor
     {
         Undo.RegisterCompleteObjectUndo(track, "Remove Empty Checkpoint Slots");
         track.RemoveEmptyCheckpointSlots();
+        manualConnectionStartIndex = -1;
         EditorUtility.SetDirty(track);
+    }
+
+    private void AddManualRouteConnection(int fromIndex, int toIndex)
+    {
+        Undo.RegisterCompleteObjectUndo(track, "Add Manual Route Link");
+        track.AddRouteConnection(fromIndex, toIndex, manualConnectionKind);
+        EditorUtility.SetDirty(track);
+        SceneView.RepaintAll();
     }
 
     private void RenameInOrder()
@@ -517,5 +633,20 @@ public sealed class RaceTrackDefinitionEditor : Editor
     private static string GetCheckpointName(int index)
     {
         return "Checkpoint_" + index.ToString("00");
+    }
+
+    private static Color GetConnectionColor(RaceRouteConnectionKind kind)
+    {
+        switch (kind)
+        {
+            case RaceRouteConnectionKind.Safe:
+                return new Color(0.25f, 0.95f, 0.45f, 0.9f);
+            case RaceRouteConnectionKind.Fast:
+                return new Color(0.15f, 0.65f, 1f, 0.9f);
+            case RaceRouteConnectionKind.Shortcut:
+                return new Color(1f, 0.82f, 0.05f, 0.95f);
+            default:
+                return new Color(1f, 1f, 1f, 0.38f);
+        }
     }
 }

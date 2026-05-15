@@ -7,6 +7,7 @@ public sealed class ArcadeRaceParticipant : MonoBehaviour
     public bool isPlayer;
 
     public int CompletedLaps { get; private set; }
+    public int CurrentCheckpointIndex { get; private set; }
     public int NextCheckpointIndex { get; private set; }
     public float ProgressScore { get; private set; }
     public float FinishTime { get; private set; }
@@ -21,7 +22,8 @@ public sealed class ArcadeRaceParticipant : MonoBehaviour
         displayName = participantName;
         isPlayer = player;
         CompletedLaps = 0;
-        NextCheckpointIndex = 1;
+        CurrentCheckpointIndex = 0;
+        NextCheckpointIndex = raceManager != null ? raceManager.GetNextProgressCheckpointIndex(CurrentCheckpointIndex) : 1;
         ProgressScore = 0f;
         FinishTime = 0f;
         HasFinished = false;
@@ -40,12 +42,19 @@ public sealed class ArcadeRaceParticipant : MonoBehaviour
             return;
         }
 
+        if (raceManager != null && raceManager.HasRouteGraph)
+        {
+            TickGraphProgress(checkpoints, checkpointRadius);
+            return;
+        }
+
         float radiusSqr = checkpointRadius * checkpointRadius;
         int safety = checkpoints.Count;
 
         while (safety > 0 && (transform.position - checkpoints[NextCheckpointIndex]).sqrMagnitude <= radiusSqr)
         {
             AdvanceCheckpoint(checkpoints.Count);
+            CurrentCheckpointIndex = NextCheckpointIndex == 0 ? checkpoints.Count - 1 : Mathf.Max(0, NextCheckpointIndex - 1);
             if (NextCheckpointIndex == 0)
             {
                 break;
@@ -78,7 +87,8 @@ public sealed class ArcadeRaceParticipant : MonoBehaviour
         }
         else
         {
-            NextCheckpointIndex = 1;
+            CurrentCheckpointIndex = 0;
+            NextCheckpointIndex = raceManager != null ? raceManager.GetNextProgressCheckpointIndex(CurrentCheckpointIndex) : 1;
         }
 
         return true;
@@ -104,17 +114,32 @@ public sealed class ArcadeRaceParticipant : MonoBehaviour
         }
     }
 
+    private void TickGraphProgress(IReadOnlyList<Vector3> checkpoints, float checkpointRadius)
+    {
+        int safety = checkpoints.Count;
+        while (safety > 0 && raceManager.TryGetProgressCheckpointHit(transform.position, CurrentCheckpointIndex, checkpointRadius, out int hitIndex))
+        {
+            CurrentCheckpointIndex = hitIndex;
+            NextCheckpointIndex = raceManager.GetNextProgressCheckpointIndex(CurrentCheckpointIndex);
+            if (NextCheckpointIndex == 0)
+            {
+                break;
+            }
+
+            safety--;
+        }
+
+        ProgressScore = CalculateProgressScore(checkpoints);
+    }
+
     private float CalculateProgressScore(IReadOnlyList<Vector3> checkpoints)
     {
         int checkpointCount = checkpoints.Count;
-        int previousCheckpoint = NextCheckpointIndex - 1;
-        if (previousCheckpoint < 0)
-        {
-            previousCheckpoint = checkpointCount - 1;
-        }
+        int previousCheckpoint = Mathf.Clamp(CurrentCheckpointIndex, 0, checkpointCount - 1);
+        int nextCheckpoint = Mathf.Clamp(NextCheckpointIndex, 0, checkpointCount - 1);
 
         Vector3 from = checkpoints[previousCheckpoint];
-        Vector3 to = checkpoints[NextCheckpointIndex];
+        Vector3 to = checkpoints[nextCheckpoint];
         Vector3 segment = to - from;
         float segmentLength = segment.magnitude;
         float segmentProgress = 0f;

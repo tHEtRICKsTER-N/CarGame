@@ -1,6 +1,6 @@
 # CarGame Plan
 
-Last updated: 2026-05-14
+Last updated: 2026-05-15
 
 ## Vision
 
@@ -18,10 +18,12 @@ Build a small Need-for-Speed-inspired arcade racing game as a personal gift proj
 - `[x]` Remove first-person camera mode.
 - `[x]` Move active development to `Assets/CartoonTracksPack1/Track1/Demo Scenes/complete_track_demo.unity`.
 - `[x]` Add the player car and chase camera to the new track scene.
-- `[~]` Build race waypoints/checkpoints for the new track.
-- `[~]` Add editor tooling to place track points manually.
-- `[~]` Design track points as an AI route graph, not only a single checkpoint loop.
+- `[x]` Build race waypoints/checkpoints for the new track.
+- `[x]` Add editor tooling to place track points manually.
+- `[x]` Infer an AI route graph from placed checkpoints without requiring manual branch marking.
+- `[x]` Add lightweight AI raycast and turn awareness for speed/steering decisions.
 - `[~]` Add start/finish trigger lap counting that validates route progress first.
+- `[~]` Validate and tune AI driving on the completed checkpoint map.
 
 ## Milestone 1: Track Scene Integration
 
@@ -31,22 +33,24 @@ Build a small Need-for-Speed-inspired arcade racing game as a personal gift proj
 - `[x]` Attach/configure `CarCameraController` on the scene camera.
 - `[ ]` Tune car position, rotation, and camera values for the track.
 - `[ ]` Confirm the car drives cleanly on the Cartoon Tracks road mesh.
-- `[~]` Add track checkpoint/waypoint data for laps and AI navigation.
-- `[~]` Add an editor tool for manually placing and reordering checkpoints.
-- `[ ]` Extend the editor tool so points can be connected as branches/alternate routes.
+- `[x]` Add track checkpoint/waypoint data for laps and AI navigation.
+- `[x]` Add an editor tool for manually placing and reordering checkpoints.
+- `[x]` Extend the editor tool so points can be connected as branches/alternate routes.
+- `[x]` Add automatic route graph inference from checkpoint positions.
 - `[~]` Add a visible start/finish trigger collider at the lap line.
 
 ## Milestone 2: Race Mode
 
 - `[ ]` Create a reusable map definition system for multiple race tracks.
 - `[ ]` Support player-selected lap count, countdown, race timer, player position, and finish result.
-- `[ ]` Spawn AI opponents at the selected map's start grid.
+- `[x]` Spawn AI opponents at the selected map's start grid.
 - `[~]` Count laps from the start/finish trigger after required checkpoint progress.
-- `[ ]` Make AI follow the track route graph reliably.
-- `[ ]` Let AI choose short, normal, or wide paths based on difficulty and current driving situation.
-- `[ ]` Add difficulty selection: Easy, Medium, Hard, EMPRESS.
-- `[ ]` Tune each difficulty with speed, steering, braking, and mistake/forgiveness values.
-- `[ ]` Tune difficulty route preference: Easy safer/wider, Medium balanced, Hard tighter, EMPRESS shortest/aggressive.
+- `[~]` Make AI follow the track route graph reliably.
+- `[~]` Let AI choose short, normal, or wide paths based on difficulty and current driving situation.
+- `[~]` Add difficulty selection: Easy, Medium, Hard, EMPRESS.
+- `[x]` Add raycast-based AI awareness for nearby cars/obstacles and track-side correction.
+- `[~]` Tune each difficulty with speed, steering, braking, and mistake/forgiveness values.
+- `[~]` Tune difficulty route preference: Easy safer/wider, Medium balanced, Hard tighter, EMPRESS shortest/aggressive.
 - `[ ]` Add a race HUD with lap, position, timer, speed, boost, and standings.
 - `[ ]` Add a simple finish screen.
 
@@ -104,9 +108,13 @@ Build a small Need-for-Speed-inspired arcade racing game as a personal gift proj
 - Reuse the existing Prometeo car controller for now.
 - Keep systems small and testable: race flow, AI, pickups, modes, UI, and camera should stay separate.
 - Track points should become a route graph: points are nodes, connections are legal road segments, and AI chooses a route through the graph.
+- The default workflow is now checkpoint-first: place points in rough driving order, then let `RaceTrackDefinition` infer the forward graph and likely shortcut links.
+- Manual route links remain available as optional corrections if one track needs a special branch.
+- The final checkpoint is not auto-drawn back to the start by default, avoiding confusing loop lines in the editor; lap completion still uses the start/finish trigger.
 - The start point is also the finish/lap point for race mode.
 - Laps should be counted by a start/finish trigger only after the racer has made valid progress through required route/checkpoint gates.
 - Use trigger gates for race progress and placement; use route points for AI steering.
+- AI opponents should combine route graph steering with local raycast awareness, so they can slow for nearby obstacles and adapt to sharp turns based on difficulty.
 - Do not use NavMesh for the main racing AI unless the waypoint graph proves insufficient.
 
 ## Known Risks
@@ -134,3 +142,12 @@ Initial AI behavior by difficulty:
 - Medium: balanced racing line, moderate speed, normal braking.
 - Hard: tighter racing line, later braking, higher speed, more willing to use shortcuts.
 - EMPRESS: shortest/aggressive route choices, highest speed, late braking, minimal hesitation.
+
+## Checkpoint Mapping Workflow
+
+- Place checkpoint objects around the drivable route in rough forward order.
+- Keep checkpoint 0 near the start/finish line.
+- Shortcut or branch points can be placed where they naturally rejoin the forward route; the auto graph looks for forward links that save distance.
+- Use the route graph preview in the `RaceTrackDefinition` inspector to check inferred links.
+- If an inferred shortcut is too aggressive or missing, tune `Auto Graph Max Connection Distance`, `Auto Graph Max Index Skip`, and `Auto Graph Minimum Shortcut Saving`.
+- Use manual route links only as corrections, not as the normal mapping workflow.
