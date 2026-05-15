@@ -1,0 +1,99 @@
+Core Screens
+
+Main Menu
+
+Game title/logo
+Play
+Garage or Car Select
+Settings
+Quit
+Optional small background: rotating selected car or track camera
+Mode Select
+
+Race Mode
+Time Attack
+Short labels only, like:
+Race: laps + AI opponents
+Time Attack: collect all coins before time ends
+Race Setup
+This can be one combined setup screen.
+
+Map selector
+Cartoon Track / Oval
+Night City: demo_city_night.unity
+Thumbnail image for each map
+Map name
+Car selector
+Previous/next buttons
+Car preview area
+Car name
+Difficulty selector
+Easy
+Medium
+Hard
+EMPRESS
+Lap selector
+- / +
+Current lap count
+Start Race
+Back
+Time Attack Setup
+Similar to race setup, but no AI difficulty/laps.
+
+Map selector
+Car selector
+Time limit preview
+Coin count preview, later when map data exists
+Start Time Attack
+Back
+In-Game HUD
+
+For Race Mode:
+
+Lap: Lap 1/3
+Position: 2/4
+Race timer
+Speed
+Boost meter
+Optional small countdown overlay: 3, 2, 1, GO
+Optional checkpoint/route arrow, but no minimap
+For Time Attack:
+
+Timer, very visible
+Coins collected: 12/30
+Speed
+Boost meter
+Optional warning state when timer is low
+Pause Screen
+
+Resume
+Restart
+Settings
+Main Menu
+Results Screen
+
+For Race Mode:
+
+Finish position
+Player time
+Standings list
+Restart
+Change Setup
+Main Menu
+For Time Attack:
+
+Win/Lose title
+Coins collected
+Time remaining or time ran out
+Restart
+Change Setup
+Main Menu
+Settings Screen
+Keep it simple:
+
+Master volume
+Music volume
+SFX volume
+Camera shake toggle
+Fullscreen toggle
+Back

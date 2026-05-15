@@ -25,6 +25,11 @@ Build a small Need-for-Speed-inspired arcade racing game as a personal gift proj
 - `[x]` Add a pre-race setup screen for lap count and AI difficulty.
 - `[x]` Add player boost meter, boost input, and boost pickups.
 - `[x]` Add difficulty-aware AI rubberbanding to keep races tense without a minimap.
+- `[x]` Organize custom scripts into a clean runtime/editor folder structure.
+- `[x]` Add speed readout and boost-aware camera FOV kick.
+- `[~]` Set up the new car pack as selectable player car visuals.
+- `[x]` Connect imported boost sprite and boost VFX assets to the existing boost system.
+- `[~]` Prepare imported timer sprite, coin pack, and night map for Time Attack/map selection work.
 - `[~]` Add start/finish trigger lap counting that validates route progress first.
 - `[~]` Validate and tune AI driving on the completed checkpoint map.
 
@@ -55,14 +60,16 @@ Build a small Need-for-Speed-inspired arcade racing game as a personal gift proj
 - `[x]` Add raycast-based AI awareness for nearby cars/obstacles and track-side correction.
 - `[~]` Tune each difficulty with speed, steering, braking, and mistake/forgiveness values.
 - `[~]` Tune difficulty route preference: Easy safer/wider, Medium balanced, Hard tighter, EMPRESS shortest/aggressive.
-- `[~]` Add a race HUD with lap, position, timer, speed, boost, and standings.
+- `[x]` Add a race HUD with lap, position, timer, speed, boost, and standings.
 - `[x]` Add a simple finish screen.
 
 ## Milestone 3: Map And Mode Selection
 
 - `[ ]` Create a main menu flow.
 - `[ ]` Add map selection.
+- `[~]` Register/import the night city map as a future selectable track.
 - `[ ]` Add mode selection: Race or Time Attack.
+- `[~]` Add player car selection.
 - `[ ]` Add AI difficulty selection for Race mode.
 - `[ ]` Make it easy to add more track maps later without rewriting race logic.
 
@@ -72,13 +79,16 @@ Build a small Need-for-Speed-inspired arcade racing game as a personal gift proj
 - `[x]` Add boost input.
 - `[x]` Add boost pickups on the track.
 - `[x]` Make boost pickups refill/increase the boost meter.
-- `[ ]` Add boost effects: FOV kick, camera feel, particles, sound, and speed trail if available.
+- `[~]` Add boost effects: FOV kick, camera feel, particles, sound, and speed trail if available.
 - `[x]` Add pickup respawn behavior.
+- `[x]` Render boost pickups using the imported 2D boost sprite with a 3D trigger collider.
+- `[x]` Add hyperdrive screen VFX and rear nitro VFX while the player is boosting.
 - `[ ]` Decide whether AI opponents can use boost.
 
 ## Milestone 5: Time Attack Mode
 
 - `[ ]` Add collectible coins to each track.
+- `[~]` Pick and register a default 3D coin prefab from the imported coin pack.
 - `[ ]` Add time attack timer.
 - `[ ]` Player wins by collecting all coins before time runs out.
 - `[ ]` Add time powerups that extend the timer.
@@ -90,10 +100,10 @@ Build a small Need-for-Speed-inspired arcade racing game as a personal gift proj
 - `[x]` Smooth chase camera and remove stutter.
 - `[x]` Remove first-person camera mode.
 - `[ ]` Add polished chase camera presets for normal driving, high speed, drift, and boost.
-- `[ ]` Add controlled speed-based FOV.
+- `[x]` Add controlled speed-based FOV.
 - `[ ]` Add optional drift/boost camera shake that does not stutter.
 - `[ ]` Add subtle camera tilt/lean during turns if it feels good.
-- `[ ]` Add stronger boost presentation.
+- `[~]` Add stronger boost presentation.
 
 ## Milestone 7: Polish
 
@@ -106,10 +116,11 @@ Build a small Need-for-Speed-inspired arcade racing game as a personal gift proj
 
 ## Technical Notes
 
-- Keep custom gameplay scripts in `Assets/Scripts`.
+- Keep custom gameplay scripts in `Assets/Scripts/Runtime`.
+- Keep editor-only tools in `Assets/Scripts/Editor`.
 - Avoid modifying imported asset package files unless there is a strong reason.
 - Prefer map/difficulty configuration data over hardcoded scene-specific logic.
-- Reuse the existing Prometeo car controller for now.
+- Keep a Prometeo-compatible controller surface for existing race systems, but use our own lightweight arcade controller now that the old package source was removed.
 - Keep systems small and testable: race flow, AI, pickups, modes, UI, and camera should stay separate.
 - Track points should become a route graph: points are nodes, connections are legal road segments, and AI chooses a route through the graph.
 - The default workflow is now checkpoint-first: place points in rough driving order, then let `RaceTrackDefinition` infer the forward graph and likely shortcut links.
@@ -121,7 +132,23 @@ Build a small Need-for-Speed-inspired arcade racing game as a personal gift proj
 - AI opponents should combine route graph steering with local raycast awareness, so they can slow for nearby obstacles and adapt to sharp turns based on difficulty.
 - Rubberbanding should use progress score, not teleporting: opponents behind the player get a smooth speed multiplier, while opponents far ahead ease off according to difficulty.
 - Player boost is handled by `ArcadeBoostController`; boost pickups are reusable trigger objects and can be auto-created from route checkpoints for quick testing.
+- Car visuals are now driven by `Assets/Resources/ArcadeCarCatalog.asset`; the race setup screen swaps the selected visual onto a generated arcade driving rig.
+- Pickup/VFX defaults are driven by `Assets/Resources/ArcadePickupCatalog.asset`; it references `Boost.png`, `Timer.png`, a default gold coin prefab, `vfx_Hyperdrive_01`, and `CarNitroVFX`.
+- Boost pickups keep 3D trigger colliders while rendering the imported 2D boost sprite as a camera-facing world sprite.
+- Player boost creates two optional VFX instances at runtime: a camera-attached hyperdrive effect and a car-attached nitro effect. Tune offsets/scales on `ArcadeBoostVfx` after visual testing.
 - Do not use NavMesh for the main racing AI unless the waypoint graph proves insufficient.
+
+## Project Structure
+
+- `Assets/Scripts/Runtime/Race`: race lifecycle, participants, start/finish trigger, bootstrap.
+- `Assets/Scripts/Runtime/AI`: opponent driving, route following, awareness, rubberbanding use.
+- `Assets/Scripts/Runtime/Boost`: boost meter/controller and pickup behavior.
+- `Assets/Scripts/Runtime/Pickups`: shared pickup asset catalog and future pickup helpers.
+- `Assets/Scripts/Runtime/Track`: track definitions, checkpoint graph data, map metadata.
+- `Assets/Scripts/Runtime/UI`: runtime HUD, race setup, and result UI.
+- `Assets/Scripts/Runtime/Camera`: custom camera behavior.
+- `Assets/Scripts/Runtime/Vehicle`: selected car catalog, runtime vehicle rig setup, and the lightweight car controller compatibility layer.
+- `Assets/Scripts/Editor/Track`: Unity editor tooling for track/checkpoint setup.
 
 ## Known Risks
 
