@@ -22,6 +22,9 @@ Build a small Need-for-Speed-inspired arcade racing game as a personal gift proj
 - `[x]` Add editor tooling to place track points manually.
 - `[x]` Infer an AI route graph from placed checkpoints without requiring manual branch marking.
 - `[x]` Add lightweight AI raycast and turn awareness for speed/steering decisions.
+- `[x]` Add a pre-race setup screen for lap count and AI difficulty.
+- `[x]` Add player boost meter, boost input, and boost pickups.
+- `[x]` Add difficulty-aware AI rubberbanding to keep races tense without a minimap.
 - `[~]` Add start/finish trigger lap counting that validates route progress first.
 - `[~]` Validate and tune AI driving on the completed checkpoint map.
 
@@ -42,17 +45,18 @@ Build a small Need-for-Speed-inspired arcade racing game as a personal gift proj
 ## Milestone 2: Race Mode
 
 - `[ ]` Create a reusable map definition system for multiple race tracks.
-- `[ ]` Support player-selected lap count, countdown, race timer, player position, and finish result.
+- `[~]` Support player-selected lap count, countdown, race timer, player position, and finish result.
 - `[x]` Spawn AI opponents at the selected map's start grid.
 - `[~]` Count laps from the start/finish trigger after required checkpoint progress.
 - `[~]` Make AI follow the track route graph reliably.
 - `[~]` Let AI choose short, normal, or wide paths based on difficulty and current driving situation.
-- `[~]` Add difficulty selection: Easy, Medium, Hard, EMPRESS.
+- `[x]` Add difficulty-aware rubberbanding so unseen opponents stay competitive.
+- `[x]` Add difficulty selection: Easy, Medium, Hard, EMPRESS.
 - `[x]` Add raycast-based AI awareness for nearby cars/obstacles and track-side correction.
 - `[~]` Tune each difficulty with speed, steering, braking, and mistake/forgiveness values.
 - `[~]` Tune difficulty route preference: Easy safer/wider, Medium balanced, Hard tighter, EMPRESS shortest/aggressive.
-- `[ ]` Add a race HUD with lap, position, timer, speed, boost, and standings.
-- `[ ]` Add a simple finish screen.
+- `[~]` Add a race HUD with lap, position, timer, speed, boost, and standings.
+- `[x]` Add a simple finish screen.
 
 ## Milestone 3: Map And Mode Selection
 
@@ -64,12 +68,12 @@ Build a small Need-for-Speed-inspired arcade racing game as a personal gift proj
 
 ## Milestone 4: Boost System
 
-- `[ ]` Add boost meter to the player.
-- `[ ]` Add boost input.
-- `[ ]` Add boost pickups on the track.
-- `[ ]` Make boost pickups refill/increase the boost meter.
+- `[x]` Add boost meter to the player.
+- `[x]` Add boost input.
+- `[x]` Add boost pickups on the track.
+- `[x]` Make boost pickups refill/increase the boost meter.
 - `[ ]` Add boost effects: FOV kick, camera feel, particles, sound, and speed trail if available.
-- `[ ]` Add pickup respawn behavior.
+- `[x]` Add pickup respawn behavior.
 - `[ ]` Decide whether AI opponents can use boost.
 
 ## Milestone 5: Time Attack Mode
@@ -115,6 +119,8 @@ Build a small Need-for-Speed-inspired arcade racing game as a personal gift proj
 - Laps should be counted by a start/finish trigger only after the racer has made valid progress through required route/checkpoint gates.
 - Use trigger gates for race progress and placement; use route points for AI steering.
 - AI opponents should combine route graph steering with local raycast awareness, so they can slow for nearby obstacles and adapt to sharp turns based on difficulty.
+- Rubberbanding should use progress score, not teleporting: opponents behind the player get a smooth speed multiplier, while opponents far ahead ease off according to difficulty.
+- Player boost is handled by `ArcadeBoostController`; boost pickups are reusable trigger objects and can be auto-created from route checkpoints for quick testing.
 - Do not use NavMesh for the main racing AI unless the waypoint graph proves insufficient.
 
 ## Known Risks

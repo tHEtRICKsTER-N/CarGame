@@ -181,6 +181,64 @@ Transform:
   m_Children: []
   m_Father: {fileID: 697915015}
   m_LocalEulerAnglesHint: {x: 0, y: 90, z: 0}
+--- !u!1 &107458682
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 107458683}
+  - component: {fileID: 107458684}
+  m_Layer: 0
+  m_Name: ArcadeRaceManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &107458683
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 107458682}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1147921295}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &107458684
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 107458682}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6facc8a0873554c4badbbe744abea6cc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ArcadeRaceManager
+  playerCar: {fileID: 2005972656}
+  trackDefinition: {fileID: 1609651909}
+  showRaceSetup: 1
+  lapsToWin: 2
+  opponentCount: 3
+  checkpointRadius: 14
+  countdownSeconds: 3
+  aiDifficulty: 1
+  baseOpponentSpeedKmh: 86
+  opponentSpeedStep: 5
+  createBoostPickups: 1
+  boostPickupInterval: 5
+  boostPickupAmount: 35
+  createTrackVisuals: 1
 --- !u!1 &134362848
 GameObject:
   m_ObjectHideFlags: 0
@@ -900,6 +958,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 54668926}
+  - {fileID: 1977687328}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &716095858
@@ -1109,6 +1168,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1609651908}
+  - {fileID: 107458683}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1154492745
@@ -1498,7 +1558,6 @@ Transform:
   - {fileID: 134362849}
   - {fileID: 634527658}
   - {fileID: 1648669822}
-  - {fileID: 1977687328}
   m_Father: {fileID: 1147921295}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &1609651909
@@ -2138,7 +2197,7 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 1609651908}
+  m_Father: {fileID: 697915015}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1001 &2005972653
 PrefabInstance:
@@ -2207,6 +2266,17 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 5474160499967644547, guid: 79d0ca8b77e301442afdb49f102e8aed, type: 3}
   m_PrefabInstance: {fileID: 2005972653}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &2005972656 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 627556911, guid: 79d0ca8b77e301442afdb49f102e8aed, type: 3}
+  m_PrefabInstance: {fileID: 2005972653}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c0fefceefe666bb4682b272ec8c5bdd0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &2029265711
 GameObject:
   m_ObjectHideFlags: 0

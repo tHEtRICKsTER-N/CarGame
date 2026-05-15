@@ -36,6 +36,7 @@ public sealed class ArcadeAIOpponent : MonoBehaviour
     private float accelerationConfidence = 1f;
     private float avoidanceStrength = 1f;
     private float sensorSpeedFloor = 0.42f;
+    private float rubberbandSpeedMultiplier = 1f;
     private bool configured;
     private readonly RaycastHit[] sensorHits = new RaycastHit[8];
 
@@ -170,13 +171,15 @@ public sealed class ArcadeAIOpponent : MonoBehaviour
         float speedKmh = carRigidbody.linearVelocity.magnitude * 3.6f;
         float turnSeverity = Mathf.Clamp01(Mathf.Max(Mathf.Abs(currentSteering), awareness.routeTurnSeverity) * cornerCaution);
         float turnSlowdown = Mathf.Lerp(desiredSpeedKmh, cautiousTurnSpeedKmh, turnSeverity);
-        float targetSpeed = localTarget.z < 0f ? 18f : turnSlowdown * awareness.speedFactor;
+        rubberbandSpeedMultiplier = Mathf.Lerp(rubberbandSpeedMultiplier, raceManager.GetAIRubberbandSpeedMultiplier(participant), 2.8f * Time.fixedDeltaTime);
+        float targetSpeed = localTarget.z < 0f ? 18f : turnSlowdown * awareness.speedFactor * rubberbandSpeedMultiplier;
         float speedBrake = Mathf.Lerp(0f, brakeStrength, Mathf.InverseLerp(targetSpeed, targetSpeed + 25f, speedKmh));
         float awarenessBrake = awareness.brakePressure * brakeStrength;
 
         if (speedKmh < targetSpeed && awareness.brakePressure < 0.55f)
         {
-            float torqueScale = Mathf.Lerp(1f, 0.35f, awareness.obstaclePressure) * accelerationConfidence;
+            float rubberbandTorque = Mathf.Lerp(0.88f, 1.18f, Mathf.InverseLerp(0.85f, 1.28f, rubberbandSpeedMultiplier));
+            float torqueScale = Mathf.Lerp(1f, 0.35f, awareness.obstaclePressure) * accelerationConfidence * rubberbandTorque;
             ApplyMotorTorque((car.accelerationMultiplier * 55f) * Mathf.Sign(Mathf.Max(localTarget.z, 0.2f)) * torqueScale);
             ApplyBrake(0f);
         }

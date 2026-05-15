@@ -9,6 +9,10 @@ public sealed class ArcadeRaceHud : MonoBehaviour
     private Text statusText;
     private Text raceInfoText;
     private Text standingsText;
+    private Text boostText;
+    private Image boostFill;
+    private GameObject finishPanel;
+    private Text finishText;
     private readonly StringBuilder builder = new StringBuilder(256);
 
     public void Initialize(ArcadeRaceManager manager)
@@ -27,6 +31,8 @@ public sealed class ArcadeRaceHud : MonoBehaviour
         UpdateStatus();
         UpdateRaceInfo();
         UpdateStandings();
+        UpdateBoostMeter();
+        UpdateFinishPanel();
     }
 
     private void BuildHud()
@@ -51,12 +57,19 @@ public sealed class ArcadeRaceHud : MonoBehaviour
         statusText = CreateText("Race Status", font, 48, TextAnchor.UpperCenter, new Vector2(0.5f, 1f), new Vector2(0f, -35f), new Vector2(650f, 90f));
         raceInfoText = CreateText("Race Info", font, 28, TextAnchor.UpperLeft, new Vector2(0f, 1f), new Vector2(30f, -30f), new Vector2(430f, 210f));
         standingsText = CreateText("Standings", font, 25, TextAnchor.UpperRight, new Vector2(1f, 1f), new Vector2(-30f, -30f), new Vector2(460f, 260f));
+        CreateBoostMeter(font);
+        CreateFinishPanel(font);
     }
 
     private Text CreateText(string name, Font font, int fontSize, TextAnchor alignment, Vector2 anchor, Vector2 anchoredPosition, Vector2 size)
     {
+        return CreateText(name, transform, font, fontSize, alignment, anchor, anchoredPosition, size);
+    }
+
+    private Text CreateText(string name, Transform parent, Font font, int fontSize, TextAnchor alignment, Vector2 anchor, Vector2 anchoredPosition, Vector2 size)
+    {
         GameObject textObject = new GameObject(name);
-        textObject.transform.SetParent(transform, false);
+        textObject.transform.SetParent(parent, false);
 
         RectTransform rectTransform = textObject.AddComponent<RectTransform>();
         rectTransform.anchorMin = anchor;
@@ -79,6 +92,69 @@ public sealed class ArcadeRaceHud : MonoBehaviour
         outline.effectDistance = new Vector2(2f, -2f);
 
         return text;
+    }
+
+    private void CreateBoostMeter(Font font)
+    {
+        GameObject boostRoot = new GameObject("Boost Meter");
+        boostRoot.transform.SetParent(transform, false);
+
+        RectTransform rootRect = boostRoot.AddComponent<RectTransform>();
+        rootRect.anchorMin = new Vector2(0f, 0f);
+        rootRect.anchorMax = new Vector2(0f, 0f);
+        rootRect.pivot = new Vector2(0f, 0f);
+        rootRect.anchoredPosition = new Vector2(30f, 34f);
+        rootRect.sizeDelta = new Vector2(360f, 72f);
+
+        boostText = CreateText("Boost Label", boostRoot.transform, font, 24, TextAnchor.MiddleLeft, new Vector2(0f, 1f), new Vector2(0f, -18f), new Vector2(360f, 34f));
+
+        GameObject backgroundObject = new GameObject("Boost Bar Background");
+        backgroundObject.transform.SetParent(boostRoot.transform, false);
+
+        RectTransform backgroundRect = backgroundObject.AddComponent<RectTransform>();
+        backgroundRect.anchorMin = new Vector2(0f, 0f);
+        backgroundRect.anchorMax = new Vector2(0f, 0f);
+        backgroundRect.pivot = new Vector2(0f, 0f);
+        backgroundRect.anchoredPosition = Vector2.zero;
+        backgroundRect.sizeDelta = new Vector2(330f, 24f);
+
+        Image background = backgroundObject.AddComponent<Image>();
+        background.color = new Color(0f, 0f, 0f, 0.65f);
+
+        GameObject fillObject = new GameObject("Boost Bar Fill");
+        fillObject.transform.SetParent(backgroundObject.transform, false);
+
+        RectTransform fillRect = fillObject.AddComponent<RectTransform>();
+        fillRect.anchorMin = new Vector2(0f, 0f);
+        fillRect.anchorMax = new Vector2(0f, 1f);
+        fillRect.pivot = new Vector2(0f, 0.5f);
+        fillRect.anchoredPosition = Vector2.zero;
+        fillRect.sizeDelta = new Vector2(330f, 0f);
+
+        boostFill = fillObject.AddComponent<Image>();
+        boostFill.color = new Color(0.05f, 0.85f, 1f, 0.92f);
+        boostFill.type = Image.Type.Filled;
+        boostFill.fillMethod = Image.FillMethod.Horizontal;
+        boostFill.fillOrigin = 0;
+    }
+
+    private void CreateFinishPanel(Font font)
+    {
+        finishPanel = new GameObject("Finish Result Panel");
+        finishPanel.transform.SetParent(transform, false);
+
+        RectTransform rectTransform = finishPanel.AddComponent<RectTransform>();
+        rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+        rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+        rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        rectTransform.anchoredPosition = Vector2.zero;
+        rectTransform.sizeDelta = new Vector2(720f, 360f);
+
+        Image image = finishPanel.AddComponent<Image>();
+        image.color = new Color(0.02f, 0.025f, 0.03f, 0.82f);
+
+        finishText = CreateText("Finish Result Text", finishPanel.transform, font, 32, TextAnchor.MiddleCenter, new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(660f, 310f));
+        finishPanel.SetActive(false);
     }
 
     private void UpdateStatus()
@@ -148,5 +224,46 @@ public sealed class ArcadeRaceHud : MonoBehaviour
         }
 
         standingsText.text = builder.ToString();
+    }
+
+    private void UpdateBoostMeter()
+    {
+        ArcadeBoostController boost = raceManager.PlayerBoost;
+        if (boostText == null || boostFill == null || boost == null)
+        {
+            return;
+        }
+
+        int boostPercent = Mathf.RoundToInt(boost.NormalizedBoost * 100f);
+        boostText.text = boost.IsBoosting ? "BOOST " + boostPercent + "%" : "Boost " + boostPercent + "%";
+        boostFill.fillAmount = boost.NormalizedBoost;
+        boostFill.color = boost.IsBoosting ? new Color(1f, 0.78f, 0.08f, 0.95f) : new Color(0.05f, 0.85f, 1f, 0.92f);
+    }
+
+    private void UpdateFinishPanel()
+    {
+        if (finishPanel == null || finishText == null)
+        {
+            return;
+        }
+
+        ArcadeRaceParticipant player = raceManager.PlayerParticipant;
+        bool showResult = raceManager.State == ArcadeRaceState.Finished && player != null && player.HasFinished;
+        finishPanel.SetActive(showResult);
+
+        if (!showResult)
+        {
+            return;
+        }
+
+        int rank = raceManager.GetRank(player);
+        builder.Length = 0;
+        builder.AppendLine(rank == 1 ? "You won!" : "Race complete");
+        builder.AppendLine();
+        builder.Append("Position ").Append(rank).Append(" / ").Append(raceManager.Participants.Count).AppendLine();
+        builder.Append("Time ").Append(player.FinishTime.ToString("0.0")).Append("s").AppendLine();
+        builder.Append("Difficulty ").Append(raceManager.AIDifficulty).AppendLine();
+        builder.Append("Laps ").Append(raceManager.LapsToWin);
+        finishText.text = builder.ToString();
     }
 }

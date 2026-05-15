@@ -18,6 +18,7 @@ public sealed class ArcadeRaceManager : MonoBehaviour
     public RaceTrackDefinition trackDefinition;
 
     [Header("Race")]
+    public bool showRaceSetup = true;
     [Range(1, 5)]
     public int lapsToWin = 2;
     [Range(1, 5)]
@@ -32,6 +33,23 @@ public sealed class ArcadeRaceManager : MonoBehaviour
     public float baseOpponentSpeedKmh = 86f;
     public float opponentSpeedStep = 5f;
 
+    [Header("Rubberbanding")]
+    public bool enableRubberbanding = true;
+    [Tooltip("Progress gap, in checkpoint units, before rubberbanding starts.")]
+    [Range(0.1f, 3f)]
+    public float rubberbandStartGap = 0.75f;
+    [Tooltip("Progress gap, in checkpoint units, where rubberbanding reaches full strength.")]
+    [Range(1f, 8f)]
+    public float rubberbandFullGap = 4f;
+    [Range(0f, 1.5f)]
+    public float rubberbandIntensity = 1f;
+
+    [Header("Boost")]
+    public bool createBoostPickups = true;
+    [Range(2, 12)]
+    public int boostPickupInterval = 5;
+    public float boostPickupAmount = 35f;
+
     [Header("Debug")]
     public bool createTrackVisuals = true;
 
@@ -44,9 +62,22 @@ public sealed class ArcadeRaceManager : MonoBehaviour
     public IReadOnlyList<RaceRouteConnection> RouteConnections { get { return routeConnections; } }
     public IReadOnlyList<ArcadeRaceParticipant> Participants { get { return participants; } }
     public ArcadeRaceParticipant PlayerParticipant { get; private set; }
+    public ArcadeBoostController PlayerBoost { get; private set; }
     public RaceAIDifficulty AIDifficulty { get { return aiDifficulty; } }
     public float CheckpointRadius { get { return checkpointRadius; } }
     public bool HasRouteGraph { get { return routeConnections.Count > 0; } }
+    public string TrackDisplayName
+    {
+        get
+        {
+            if (trackDefinition != null && !string.IsNullOrWhiteSpace(trackDefinition.displayName))
+            {
+                return trackDefinition.displayName;
+            }
+
+            return SceneManager.GetActiveScene().name;
+        }
+    }
 
     private readonly List<Vector3> checkpoints = new List<Vector3>();
     private readonly List<RaceRouteConnection> routeConnections = new List<RaceRouteConnection>();
@@ -60,7 +91,11 @@ public sealed class ArcadeRaceManager : MonoBehaviour
     private Vector3 startForward;
     private Vector3 startRight;
     private Vector3 playerSpawnPosition;
+    private ArcadeRaceSetupMenu setupMenu;
+    private Transform pickupRoot;
     private bool initialized;
+    private bool opponentsSpawned;
+    private bool hudCreated;
 
     private void Start()
     {
@@ -110,6 +145,10 @@ public sealed class ArcadeRaceManager : MonoBehaviour
         {
             RaceTime += Time.deltaTime;
             TickParticipants();
+        }
+        else if (State == ArcadeRaceState.Setup)
+        {
+            HoldPlayerAtStart();
         }
     }
 
@@ -161,6 +200,78 @@ public sealed class ArcadeRaceManager : MonoBehaviour
         List<ArcadeRaceParticipant> standings = new List<ArcadeRaceParticipant>(participants);
         standings.Sort(CompareParticipants);
         return standings;
+    }
+
+    public float GetAIRubberbandSpeedMultiplier(ArcadeRaceParticipant participant)
+    {
+        if (!enableRubberbanding || rubberbandIntensity <= 0f || participant == null || participant.isPlayer || PlayerParticipant == null)
+        {
+            return 1f;
+        }
+
+        if (participant.HasFinished || PlayerParticipant.HasFinished || checkpoints.Count < 2)
+        {
+            return 1f;
+        }
+
+        float progressGap = PlayerParticipant.ProgressScore - participant.ProgressScore;
+        float startGap = Mathf.Max(0.01f, rubberbandStartGap);
+        float fullGap = Mathf.Max(startGap + 0.01f, rubberbandFullGap);
+
+        if (Mathf.Abs(progressGap) <= startGap)
+        {
+            return 1f;
+        }
+
+        GetRubberbandProfile(aiDifficulty, out float catchUpStrength, out float leaderSlowdownStrength);
+
+        if (progressGap > 0f)
+        {
+            float catchUp = Mathf.InverseLerp(startGap, fullGap, progressGap);
+            return 1f + catchUpStrength * catchUp * rubberbandIntensity;
+        }
+
+        float leaderGap = -progressGap;
+        float slowDown = Mathf.InverseLerp(startGap, fullGap, leaderGap);
+        return Mathf.Max(0.65f, 1f - leaderSlowdownStrength * slowDown * rubberbandIntensity);
+    }
+
+    public void SetRaceSetup(int selectedLaps, RaceAIDifficulty selectedDifficulty)
+    {
+        lapsToWin = Mathf.Clamp(selectedLaps, 1, 5);
+        aiDifficulty = selectedDifficulty;
+    }
+
+    public void BeginCountdown()
+    {
+        if (!initialized || State != ArcadeRaceState.Setup)
+        {
+            return;
+        }
+
+        PositionPlayerAtStart();
+
+        if (!opponentsSpawned)
+        {
+            SpawnOpponents();
+            opponentsSpawned = true;
+        }
+
+        if (!hudCreated)
+        {
+            CreateHud();
+            hudCreated = true;
+        }
+
+        if (setupMenu != null)
+        {
+            Destroy(setupMenu.gameObject);
+            setupMenu = null;
+        }
+
+        CountdownRemaining = countdownSeconds;
+        RaceTime = 0f;
+        State = ArcadeRaceState.Countdown;
     }
 
     public int GetNextProgressCheckpointIndex(int currentIndex)
@@ -295,13 +406,18 @@ public sealed class ArcadeRaceManager : MonoBehaviour
         }
 
         CreateStartFinishTrigger();
+        CreateBoostPickups();
         PositionPlayerAtStart();
         RegisterPlayer();
-        SpawnOpponents();
-        CreateHud();
 
-        CountdownRemaining = countdownSeconds;
-        State = ArcadeRaceState.Countdown;
+        if (showRaceSetup)
+        {
+            CreateSetupMenu();
+        }
+        else
+        {
+            BeginCountdown();
+        }
     }
 
     private void BuildTrack()
@@ -415,6 +531,14 @@ public sealed class ArcadeRaceManager : MonoBehaviour
 
         PlayerParticipant.Initialize(this, "You", true);
         participants.Add(PlayerParticipant);
+
+        PlayerBoost = playerCar.GetComponent<ArcadeBoostController>();
+        if (PlayerBoost == null)
+        {
+            PlayerBoost = playerCar.gameObject.AddComponent<ArcadeBoostController>();
+        }
+
+        PlayerBoost.Initialize(this, playerCar);
     }
 
     private void SpawnOpponents()
@@ -432,6 +556,12 @@ public sealed class ArcadeRaceManager : MonoBehaviour
                 opponentCar.useSounds = false;
                 opponentCar.useTouchControls = false;
                 opponentCar.enabled = false;
+            }
+
+            ArcadeBoostController opponentBoost = opponentObject.GetComponent<ArcadeBoostController>();
+            if (opponentBoost != null)
+            {
+                Destroy(opponentBoost);
             }
 
             DisableOpponentAudio(opponentObject);
@@ -618,6 +748,29 @@ public sealed class ArcadeRaceManager : MonoBehaviour
         }
     }
 
+    private static void GetRubberbandProfile(RaceAIDifficulty difficulty, out float catchUpStrength, out float leaderSlowdownStrength)
+    {
+        switch (difficulty)
+        {
+            case RaceAIDifficulty.Easy:
+                catchUpStrength = 0.07f;
+                leaderSlowdownStrength = 0.2f;
+                break;
+            case RaceAIDifficulty.Hard:
+                catchUpStrength = 0.18f;
+                leaderSlowdownStrength = 0.08f;
+                break;
+            case RaceAIDifficulty.EMPRESS:
+                catchUpStrength = 0.28f;
+                leaderSlowdownStrength = 0.03f;
+                break;
+            default:
+                catchUpStrength = 0.12f;
+                leaderSlowdownStrength = 0.13f;
+                break;
+        }
+    }
+
     private float GetFlatDistance(int fromIndex, int toIndex)
     {
         if (fromIndex < 0 || fromIndex >= checkpoints.Count || toIndex < 0 || toIndex >= checkpoints.Count)
@@ -656,6 +809,36 @@ public sealed class ArcadeRaceManager : MonoBehaviour
         GameObject hudObject = new GameObject("Arcade Race HUD");
         ArcadeRaceHud hud = hudObject.AddComponent<ArcadeRaceHud>();
         hud.Initialize(this);
+    }
+
+    private void CreateSetupMenu()
+    {
+        GameObject setupObject = new GameObject("Arcade Race Setup Menu");
+        setupMenu = setupObject.AddComponent<ArcadeRaceSetupMenu>();
+        setupMenu.Initialize(this);
+    }
+
+    private void CreateBoostPickups()
+    {
+        if (!createBoostPickups || checkpoints.Count < 4)
+        {
+            return;
+        }
+
+        GameObject rootObject = new GameObject("Arcade Boost Pickups");
+        rootObject.transform.SetParent(transform, false);
+        pickupRoot = rootObject.transform;
+
+        int interval = Mathf.Max(2, boostPickupInterval);
+        for (int i = interval; i < checkpoints.Count - 1; i += interval)
+        {
+            GameObject pickupObject = new GameObject("Boost Pickup " + i);
+            pickupObject.transform.SetParent(pickupRoot, false);
+            pickupObject.transform.position = checkpoints[i] + Vector3.up * 1.15f;
+
+            ArcadeBoostPickup pickup = pickupObject.AddComponent<ArcadeBoostPickup>();
+            pickup.boostAmount = boostPickupAmount;
+        }
     }
 
     private void CreateStartFinishTrigger()
